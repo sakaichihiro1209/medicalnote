@@ -295,35 +295,12 @@
                 method: 'POST',
                 body: formData
             })
-            .then(res => res.text())
-            .then(html => {
-                // HTMXの手動スワップ再現
-                const container = document.getElementById('inbox-list-container');
-                if (container) {
-                    const tempDiv = document.createElement('div');
-                    tempDiv.innerHTML = html;
-                    
-                    // OOB要素のスワップ (バッジ更新やトースト表示など)
-                    const oobElements = tempDiv.querySelectorAll('[hx-swap-oob]');
-                    oobElements.forEach(el => {
-                        const targetId = el.getAttribute('id');
-                        const target = document.getElementById(targetId);
-                        if (target) {
-                            target.outerHTML = el.outerHTML;
-                        } else {
-                            // DOMにまだ存在しないOOB要素はbodyに追加する
-                            document.body.appendChild(el);
-                        }
-                        el.remove();
-                    });
-                    
-                    container.innerHTML = tempDiv.innerHTML;
-                    htmx.process(container);
-                }
-            })
             .catch(err => {
-                console.error('Background upload failed:', err);
+                console.error('Background upload trigger failed:', err);
             });
+
+            // アップロード完了を検知するポーリング処理を開始
+            startUploadPolling();
 
             // 待たずに即座にクローズ
             closeNewCaptureModal();
@@ -350,19 +327,80 @@
             toast.id = 'bg-sync-toast';
             toast.style.cssText = 'position: fixed; bottom: 1.5rem; left: 1.5rem; background: #2d3748; color: white; padding: 0.75rem 1.25rem; border-radius: var(--radius-md); box-shadow: var(--shadow-lg); font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem; z-index: 9999; animation: fadeInUp 0.3s ease-out;';
             
-            toast.innerHTML = `
-                <span class="material-symbols-outlined" style="animation: spin 1.5s linear infinite; color: var(--color-primary); font-size: 1.25rem; display: inline-block; vertical-align: middle;">sync</span>
-                <span>\${message}</span>
-            `;
+            toast.innerHTML = 
+                '<span class="material-symbols-outlined" style="animation: spin 1.5s linear infinite; color: var(--color-primary); font-size: 1.25rem; display: inline-block; vertical-align: middle;">sync</span>' +
+                '<span>' + message + '</span>';
             
             document.body.appendChild(toast);
             
-            // 6秒後にフェードアウトして削除
+            // 8秒後にフェードアウトして削除 (アップロード時間考慮で少し長めに維持)
             setTimeout(() => {
                 toast.style.transition = 'opacity 0.5s';
                 toast.style.opacity = '0';
                 setTimeout(() => toast.remove(), 500);
-            }, 6000);
+            }, 8000);
+        }
+
+        // バックグラウンドのアップロード完了を監視して自動リフレッシュするポーリング
+        function startUploadPolling() {
+            let pollCount = 0;
+            const pollInterval = setInterval(() => {
+                pollCount++;
+                fetch('/inbox/upload-status')
+                    .then(res => res.json())
+                    .then(data => {
+                        // アップロードが完了した（activeがfalseになった）
+                        if (!data.active) {
+                            clearInterval(pollInterval);
+                            refreshInboxList();
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Polling error:', err);
+                    });
+
+                // 最大1分（24回）で監視を打ち切る
+                if (pollCount > 24) {
+                    clearInterval(pollInterval);
+                }
+            }, 2500);
+        }
+
+        // InboxリストとバッジをHTMXでリフレッシュする
+        function refreshInboxList() {
+            const container = document.getElementById('inbox-list-container');
+            if (container) {
+                htmx.ajax('GET', '/inbox/list', {target: '#inbox-list-container'})
+                    .then(() => {
+                        // バッジ件数も最新化する
+                        refreshInboxBadge();
+                        
+                        // 「保存完了」の成功トーストを表示
+                        showSuccessToast('Google ドライブへ保存しました');
+                    });
+            }
+        }
+
+        // 保存完了時のトースト表示
+        function showSuccessToast(message) {
+            const oldToast = document.getElementById('bg-sync-toast');
+            if (oldToast) oldToast.remove();
+
+            const toast = document.createElement('div');
+            toast.id = 'bg-sync-toast';
+            toast.style.cssText = 'position: fixed; bottom: 1.5rem; left: 1.5rem; background: #2f855a; color: white; padding: 0.75rem 1.25rem; border-radius: var(--radius-md); box-shadow: var(--shadow-lg); font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem; z-index: 9999; animation: fadeInUp 0.3s ease-out;';
+            
+            toast.innerHTML = 
+                '<span class="material-symbols-outlined" style="color: white; font-size: 1.25rem; display: inline-block; vertical-align: middle;">check_circle</span>' +
+                '<span>' + message + '</span>';
+            
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.transition = 'opacity 0.5s';
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 500);
+            }, 4000);
         }
 
         // モバイルメニュー（ドロワー）の制御

@@ -472,6 +472,13 @@ def inbox_list():
     return render_template("partials/inbox_list.html", captures=captures)
 
 
+@app.route("/inbox/upload-status", methods=["GET"])
+def upload_status():
+    """現在バックグラウンドでドライブ書き込み（アップロード等）が走っているかどうかを取得する。"""
+    global DRIVE_TASK_ACTIVE
+    return jsonify({"active": DRIVE_TASK_ACTIVE})
+
+
 def make_inbox_list_response(captures):
     """リストHTMLとバッジ更新OOB用HTMLを結合して返却する。"""
     list_html = render_template("partials/inbox_list.html", captures=captures)
