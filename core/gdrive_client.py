@@ -4,7 +4,7 @@ Google Drive API の接続と基本的な CRUD 操作をカプセル化するモ
 
 import io
 import os
-from flask import session
+from flask import session, has_request_context
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
@@ -20,7 +20,16 @@ def get_credentials() -> Credentials | None:
     client_secret = settings.get("GOOGLE_CLIENT_SECRET")
     
     # セッション内のリフレッシュトークンを優先（Web画面からの連携を動的にサポートするため）
-    refresh_token = session.get("google_refresh_token") or settings.get("GOOGLE_REFRESH_TOKEN")
+    # リクエストコンテキストが存在する場合のみ Flask の session に安全にアクセスする
+    refresh_token = None
+    if has_request_context():
+        try:
+            refresh_token = session.get("google_refresh_token")
+        except Exception:
+            pass
+
+    if not refresh_token:
+        refresh_token = settings.get("GOOGLE_REFRESH_TOKEN")
 
     if not client_id or not client_secret or not refresh_token:
         return None

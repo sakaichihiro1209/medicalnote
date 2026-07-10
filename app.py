@@ -530,24 +530,7 @@ def new_capture():
     captures = inbox_repository.list_captures()
     list_html = make_inbox_list_response(captures)
 
-    # 画面左下に非同期アップロード開始を知らせるトースト通知 (数秒で自動消滅)
-    notification_html = """
-    <div id="bg-sync-toast" style="position: fixed; bottom: 1.5rem; left: 1.5rem; background: #2d3748; color: white; padding: 0.75rem 1.25rem; border-radius: var(--radius-md); box-shadow: var(--shadow-lg); font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem; z-index: 9999; animation: fadeInUp 0.3s ease-out;" hx-swap-oob="true">
-        <span class="material-symbols-outlined" style="animation: spin 1.5s linear infinite; color: var(--color-primary); font-size: 1.25rem; display: inline-block; vertical-align: middle;">sync</span>
-        <span>Google ドライブへ保存中...</span>
-        <script>
-            setTimeout(() => {
-                const toast = document.getElementById('bg-sync-toast');
-                if (toast) {
-                    toast.style.transition = 'opacity 0.5s';
-                    toast.style.opacity = '0';
-                    setTimeout(() => toast.remove(), 500);
-                }
-            }, 6000);
-        </script>
-    </div>
-    """
-    return list_html + notification_html
+    return list_html
 
 
 @app.route("/inbox/<drive_file_id>/amend", methods=["POST"])
