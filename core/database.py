@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS knowledge (
 CREATE TABLE IF NOT EXISTS section_master (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     section_name TEXT NOT NULL UNIQUE,
+    color TEXT,
     usage_count INTEGER DEFAULT 0,
     created_at TEXT,
     updated_at TEXT
@@ -38,8 +39,6 @@ CREATE TABLE IF NOT EXISTS inbox_cache (
     organized INTEGER NOT NULL DEFAULT 0
 );
 """
-
-DEFAULT_SECTIONS: List[str] = ["病態", "診断", "治療", "薬剤", "手技", "鑑別", "Rule"]
 
 
 def get_db_path() -> Path:
@@ -66,18 +65,23 @@ def connect() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """データベースファイルが無い/空の場合にスキーマを作成し、初期セクション候補を投入する。
+    """データベースファイルが無い/空の場合にスキーマを作成する。
     スキーマが古い場合は、ファイルを物理削除して再構築する。
     """
     db_path = get_db_path()
     if db_path.exists():
         try:
             conn = sqlite3.connect(str(db_path))
+            # knowledgeテーブルの確認
             cur = conn.execute("PRAGMA table_info(knowledge)")
             cols = [row[1] for row in cur.fetchall()]
+            # section_masterの確認
+            cur = conn.execute("PRAGMA table_info(section_master)")
+            sec_cols = [row[1] for row in cur.fetchall()]
             conn.close()
-            # 古い構造（contentカラムが無い、または inbox_cache が未定義）なら削除
-            if cols and "content" not in cols:
+
+            # 古い構造なら削除
+            if (cols and "content" not in cols) or (sec_cols and "color" not in sec_cols):
                 print("Old schema detected. Rebuilding SQLite cache DB...")
                 db_path.unlink()
         except Exception as e:
@@ -90,16 +94,6 @@ def init_db() -> None:
     conn = connect()
     try:
         conn.executescript(SCHEMA)
-        cur = conn.execute("SELECT COUNT(*) AS c FROM section_master")
-        count = cur.fetchone()["c"]
-        if count == 0:
-            ts = now_iso()
-            for name in DEFAULT_SECTIONS:
-                conn.execute(
-                    "INSERT OR IGNORE INTO section_master "
-                    "(section_name, usage_count, created_at, updated_at) VALUES (?, 0, ?, ?)",
-                    (name, ts, ts),
-                )
         conn.commit()
     finally:
         conn.close()

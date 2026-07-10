@@ -36,20 +36,8 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", "medical-secret-key-12345")
 
 @app.template_filter("section_color_class")
 def section_color_class(name: str) -> str:
-    """セクション名からパステルカラー用のCSSクラスを決定論的に割り当てる。"""
-    name_map = {
-        "概要": "gaiyou",
-        "診断": "shindan",
-        "治療": "chiryou",
-        "症状": "shoujou",
-        "処方": "shofou",
-        "検査": "kensa",
-    }
-    if name in name_map:
-        return f"sec-col-{name_map[name]}"
-    # 簡易ハッシュ計算で 0〜11 を選択
-    h = sum(ord(c) for c in name) % 12
-    return f"sec-col-{h}"
+    """セクション名からパステルカラー用のCSSクラスを一意に割り当てる。"""
+    return knowledge_repository.get_or_create_section_color(name)
 
 
 @app.before_request
