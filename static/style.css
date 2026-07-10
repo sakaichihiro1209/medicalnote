@@ -133,6 +133,7 @@ header {
   flex: 1;
   height: calc(100vh - 65px);
   position: relative;
+  overflow: hidden; /* ペインの枠外押し出しによる不要なスクロールを抑止 */
 }
 
 /* 3ペイン構成 (Knowledgeカード一覧 / 詳細 / Inbox) */
@@ -628,6 +629,12 @@ header {
     width: 100%;
     height: calc(100vh - 58px);
     z-index: 45;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .pane-inbox-panel.hidden {
+    transform: translateX(100%);
+    position: fixed; /* デスクトップ用の absolute による上書きを防ぐ */
   }
   
   .detail-header-wrapper {
