@@ -152,10 +152,19 @@ def google_callback():
             settings.set_val("GOOGLE_REFRESH_TOKEN", credentials.refresh_token)
             # メモリ上のフォルダ構造キャッシュを破棄して再ロードさせる
             gdrive_client.clear_vault_cache()
+            # ログインしたアカウントに合わせて古いキャッシュを全クリア (混在防止)
+            db = database.connect()
+            try:
+                with db:
+                    db.execute("DELETE FROM knowledge")
+                    db.execute("DELETE FROM inbox_cache")
+            finally:
+                db.close()
             # 初回フォルダ構造の構築
             gdrive_client.ensure_vault_structure()
-            # キャッシュの再構築を実行
+            # ナレッジ & Inbox キャッシュの再構築を実行
             knowledge_repository.rebuild_cache_from_gdrive()
+            inbox_repository.rebuild_inbox_cache()
 
         return redirect(url_for("index"))
     except Exception as e:
@@ -180,6 +189,7 @@ def google_logout():
     try:
         with db:
             db.execute("DELETE FROM knowledge")
+            db.execute("DELETE FROM inbox_cache")
     finally:
         db.close()
     return redirect(url_for("index"))
@@ -433,10 +443,12 @@ def make_inbox_list_response(captures):
     list_html = render_template("partials/inbox_list.html", captures=captures)
     unorganized_count = inbox_repository.get_unorganized_count()
     if unorganized_count > 0:
-        badge_html = f'<span class="badge" id="inbox-badge" hx-swap-oob="true">{unorganized_count}</span>'
+        badge_html = f'<span class="badge" id="inbox-badge" hx-swap-oob="true" style="display: inline-block;">{unorganized_count}</span>'
+        drawer_badge_html = f'<span class="badge" id="drawer-inbox-badge" hx-swap-oob="true" style="display: inline-block;">{unorganized_count}</span>'
     else:
-        badge_html = '<span id="inbox-badge" hx-swap-oob="delete"></span>'
-    return list_html + badge_html
+        badge_html = '<span class="badge" id="inbox-badge" hx-swap-oob="true" style="display: none;">0</span>'
+        drawer_badge_html = '<span class="badge" id="drawer-inbox-badge" hx-swap-oob="true" style="display: none;">0</span>'
+    return list_html + badge_html + drawer_badge_html
 
 
 @app.route("/inbox/new", methods=["POST"])

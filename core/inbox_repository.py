@@ -67,9 +67,9 @@ def rebuild_inbox_cache() -> int:
 
                 is_organized = existing_map.get(file_id, 0)
 
-                # ファイル名から日付と見出しを解析
+                # ファイル名から日付を解析し、タイトルはファイル名（拡張子除く）そのままとする
                 dt = datetime.now()
-                title = name[:-3]  # 拡張子 .md を除く
+                title = name[:-3] if name.lower().endswith(".md") else name
 
                 if len(name) >= 16 and name[8] == "_" and name[15] == "_":
                     try:
@@ -80,8 +80,6 @@ def rebuild_inbox_cache() -> int:
                         minute = int(name[11:13])
                         second = int(name[13:15])
                         dt = datetime(year, month, day, hour, minute, second)
-                        if len(name) > 16:
-                            title = name[16:-3]
                     except ValueError:
                         pass
 
@@ -96,7 +94,7 @@ def rebuild_inbox_cache() -> int:
                 db.execute(
                     "INSERT OR REPLACE INTO inbox_cache (drive_file_id, file_name, title, date_time, content, organized) "
                     "VALUES (?, ?, ?, ?, ?, ?)",
-                    (file_id, name, title if title else "無題のメモ", dt_str, text, is_organized),
+                    (file_id, name, title, dt_str, text, is_organized),
                 )
                 restored += 1
         return restored
@@ -109,6 +107,10 @@ def rebuild_inbox_cache() -> int:
 
 def list_captures() -> List[Dict]:
     """SQLite キャッシュから Inbox の全ファイルリストを取得する。未整理が上、整理済みが下に並びます。"""
+    # Google ログインしていない状態ではキャッシュを読み込まない
+    if not gdrive_client.get_credentials():
+        return []
+
     db = database.connect()
     try:
         cur = db.execute("SELECT COUNT(*) AS c FROM inbox_cache")

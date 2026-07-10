@@ -45,9 +45,7 @@
             </button>
             <button class="btn btn-secondary" onclick="toggleInbox()">
                 <span class="material-symbols-outlined">mail</span> Inbox
-                {% if unorganized_inbox_count > 0 %}
-                    <span class="badge" id="inbox-badge">{{ unorganized_inbox_count }}</span>
-                {% endif %}
+                <span class="badge" id="inbox-badge" {% if not unorganized_inbox_count or unorganized_inbox_count == 0 %}style="display: none;"{% endif %}>{{ unorganized_inbox_count if unorganized_inbox_count else 0 }}</span>
             </button>
         </div>
 
@@ -100,9 +98,7 @@
                     <h4>メモ管理</h4>
                     <button class="btn btn-secondary drawer-btn" onclick="toggleInbox(); toggleMobileMenu();">
                         <span class="material-symbols-outlined">mail</span> Inbox（未整理メモ）
-                        {% if unorganized_inbox_count > 0 %}
-                            <span class="badge" id="drawer-inbox-badge">{{ unorganized_inbox_count }}</span>
-                        {% endif %}
+                        <span class="badge" id="drawer-inbox-badge" {% if not unorganized_inbox_count or unorganized_inbox_count == 0 %}style="display: none;"{% endif %}>{{ unorganized_inbox_count if unorganized_inbox_count else 0 }}</span>
                     </button>
                 </div>
             </div>

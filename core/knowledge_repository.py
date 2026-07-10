@@ -95,6 +95,10 @@ def rebuild_cache_from_gdrive() -> Dict[str, int]:
 
 def list_cards(query: str = "") -> List[Dict]:
     """SQLite キャッシュからカード一覧を取得する。検索文字列 (query) による部分一致に対応。"""
+    # Google ログインしていない状態ではキャッシュを読み込まない
+    if not gdrive_client.get_credentials():
+        return []
+
     db = database.connect()
     try:
         if query.strip():
@@ -112,6 +116,10 @@ def list_cards(query: str = "") -> List[Dict]:
 
 def get_card_by_id(drive_file_id: str) -> Tuple[Optional[markdown_parser.KnowledgeDocument], Optional[Dict]]:
     """指定された ID のカードをキャッシュDB（フォールバックでGoogleドライブ）から読み込んでパースしたオブジェクトとDB情報を取得する。"""
+    # Google ログインしていない状態ではキャッシュを読み込まない
+    if not gdrive_client.get_credentials():
+        return None, None
+
     db = database.connect()
     try:
         cur = db.execute(
