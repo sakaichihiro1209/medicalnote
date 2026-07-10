@@ -157,11 +157,10 @@ def create_capture(
     image_refs = []
     if images:
         attachments_folder_id = structure["attachments"]
-        for original_name, byte_data in images:
-            # 競合を避けるためにタイムスタンプを付与
-            dest_name = f"{stamp}_{original_name}"
-            # 拡張子から MIME タイプを推定
-            ext = original_name.split(".")[-1].lower()
+        for i, (original_name, byte_data) in enumerate(images):
+            # 競合（スマホから同じファイル名で複数送られた場合など）を避けるためにインデックス付きタイムスタンプを付与
+            ext = original_name.split(".")[-1].lower() if "." in original_name else "jpg"
+            dest_name = f"{stamp}_{i}_{original_name}"
             mime_type = f"image/{ext}" if ext in ["png", "jpg", "jpeg", "gif", "webp"] else "application/octet-stream"
 
             file_id = gdrive_client.upload_file_bytes(

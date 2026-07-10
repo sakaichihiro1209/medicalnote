@@ -463,13 +463,14 @@ def new_capture():
     title_hint = request.form.get("title_hint", "").strip()
     title_hint = title_hint if title_hint else None
 
-    # 画像ファイルの読み込み
+    # 画像ファイルの読み込み (フォルダ選択とカメラ撮影の別々のフィールドからマージ)
     images = []
-    if "images" in request.files:
-        files = request.files.getlist("images")
-        for f in files:
-            if f.filename:
-                images.append((f.filename, f.read()))
+    for key in ["images_lib", "images_cam"]:
+        if key in request.files:
+            files = request.files.getlist(key)
+            for f in files:
+                if f.filename:
+                    images.append((f.filename, f.read()))
 
     inbox_repository.create_capture(text, title_hint=title_hint, images=images)
 
