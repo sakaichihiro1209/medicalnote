@@ -17,6 +17,7 @@ from flask import (
 )
 from google_auth_oauthlib.flow import Flow
 import io
+import threading
 
 # 相対パスでの core モジュールのインポート
 from core import database
@@ -32,6 +33,34 @@ os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 app = Flask(__name__)
 # Render.com等での本番鍵の取得、無ければデフォルト
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "medical-secret-key-12345")
+
+# ドライブ操作排他ロック & ステータス
+DRIVE_LOCK = threading.Lock()
+DRIVE_TASK_ACTIVE = False
+DRIVE_TASK_NAME = None
+
+
+def check_drive_lock_and_respond():
+    """現在バックグラウンドでドライブ操作が走っている場合、競合回避用のダイアログHTMLを即座に返す。"""
+    global DRIVE_TASK_ACTIVE, DRIVE_TASK_NAME
+    if DRIVE_TASK_ACTIVE:
+        task_desc = DRIVE_TASK_NAME or "同期処理"
+        # OOBスワップで競合モーダルをポップアップさせ、現在の処理は何も行わずに終了する
+        conflict_html = f"""
+        <div id="conflict-modal" class="modal-overlay" style="display: flex; z-index: 9999;" hx-swap-oob="true">
+            <div class="modal-content" style="max-width: 400px; text-align: center; position: relative;">
+                <h3 class="modal-title" style="color: var(--color-warning); margin-bottom: 0.75rem;">⚠️ ドライブ処理の順番待ち</h3>
+                <div style="margin: 1.5rem 0;">
+                    <div class="material-symbols-outlined" style="animation: spin 1.5s linear infinite; font-size: 3rem; color: var(--color-warning); margin-bottom: 0.75rem;">sync</div>
+                    <p style="font-size: 0.95rem; font-weight: 600; line-height: 1.5;">現在、Google ドライブへの「{task_desc}」が進行中です。</p>
+                    <p style="font-size: 0.8rem; color: var(--color-text-gray); margin-top: 0.5rem;">完了するまでしばらくお待ちいただき、時間をおいて再度お試しください。</p>
+                </div>
+                <button type="button" class="btn btn-secondary" style="width: 100%;" onclick="document.getElementById('conflict-modal').style.display='none'">閉じる</button>
+            </div>
+        </div>
+        """
+        return conflict_html
+    return None
 
 
 @app.template_filter("section_color_class")
@@ -270,6 +299,10 @@ def get_card(drive_file_id: str):
 @app.route("/knowledge/new", methods=["POST"])
 def new_card():
     """新規カードの作成。同名がある場合はエラーを返す。"""
+    conflict = check_drive_lock_and_respond()
+    if conflict:
+        return conflict
+
     title = request.form.get("title", "").strip()
     if not title:
         return "<div style='padding: 2rem; color: var(--color-danger);'>タイトルが空です</div>", 400
@@ -357,6 +390,10 @@ def get_section_card(drive_file_id: str, section_name: str):
 @app.route("/knowledge/<drive_file_id>/sections/<section_name>", methods=["POST"])
 def save_section(drive_file_id: str, section_name: str):
     """インライン編集の内容を保存し、Googleドライブに書き戻した上でカード表示に戻す。"""
+    conflict = check_drive_lock_and_respond()
+    if conflict:
+        return conflict
+
     doc, info = knowledge_repository.get_card_by_id(drive_file_id)
     if not doc or not info:
         return "Error", 404
@@ -387,6 +424,10 @@ def save_section(drive_file_id: str, section_name: str):
 @app.route("/knowledge/<drive_file_id>/sections/add", methods=["POST"])
 def add_section(drive_file_id: str):
     """セクションをカードへ追加し、上書き保存する。同名がある場合はエラー。"""
+    conflict = check_drive_lock_and_respond()
+    if conflict:
+        return conflict
+
     doc, info = knowledge_repository.get_card_by_id(drive_file_id)
     if not doc or not info:
         return "Error", 404
@@ -446,12 +487,17 @@ def make_inbox_list_response(captures):
 
 @app.route("/inbox/new", methods=["POST"])
 def new_capture():
-    """新規キャプチャの作成 (テキスト & 画像アップロード対応)。"""
+    """新規キャプチャの作成 (バックグラウンド非同期アップロード対応)。"""
+    # 既に別のアクティブタスクがあれば順番待ち
+    conflict = check_drive_lock_and_respond()
+    if conflict:
+        return conflict
+
     text = request.form.get("text", "")
     title_hint = request.form.get("title_hint", "").strip()
     title_hint = title_hint if title_hint else None
 
-    # 画像ファイルの読み込み (フォルダ選択とカメラ撮影の別々のフィールドからマージ)
+    # 画像ファイルの読み込み (フォルダ選択とカメラ撮影の別々のフィールドからマージしてメモリに保持)
     images = []
     for key in ["images_lib", "images_cam"]:
         if key in request.files:
@@ -460,16 +506,57 @@ def new_capture():
                 if f.filename:
                     images.append((f.filename, f.read()))
 
-    inbox_repository.create_capture(text, title_hint=title_hint, images=images)
+    # バックグラウンドスレッドの処理ロジック
+    def bg_upload():
+        global DRIVE_TASK_ACTIVE, DRIVE_TASK_NAME
+        with DRIVE_LOCK:
+            DRIVE_TASK_ACTIVE = True
+            DRIVE_TASK_NAME = "新規メモのアップロード"
+            try:
+                # ドライブへアップロード
+                inbox_repository.create_capture(text, title_hint=title_hint, images=images)
+                # 完了後にキャッシュ再スキャン
+                inbox_repository.rebuild_inbox_cache()
+            except Exception as e:
+                print(f"Background upload task failed: {e}")
+            finally:
+                DRIVE_TASK_ACTIVE = False
+                DRIVE_TASK_NAME = None
 
-    # 追加後のリスト表示をHTMXでリフレッシュ
+    # 非同期スレッドを起動
+    threading.Thread(target=bg_upload).start()
+
+    # 即座にレスポンスを返す
     captures = inbox_repository.list_captures()
-    return make_inbox_list_response(captures)
+    list_html = make_inbox_list_response(captures)
+
+    # 画面左下に非同期アップロード開始を知らせるトースト通知 (数秒で自動消滅)
+    notification_html = """
+    <div id="bg-sync-toast" style="position: fixed; bottom: 1.5rem; left: 1.5rem; background: #2d3748; color: white; padding: 0.75rem 1.25rem; border-radius: var(--radius-md); box-shadow: var(--shadow-lg); font-size: 0.85rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem; z-index: 9999; animation: fadeInUp 0.3s ease-out;" hx-swap-oob="true">
+        <span class="material-symbols-outlined" style="animation: spin 1.5s linear infinite; color: var(--color-primary); font-size: 1.25rem; display: inline-block; vertical-align: middle;">sync</span>
+        <span>Google ドライブへ保存中...</span>
+        <script>
+            setTimeout(() => {
+                const toast = document.getElementById('bg-sync-toast');
+                if (toast) {
+                    toast.style.transition = 'opacity 0.5s';
+                    toast.style.opacity = '0';
+                    setTimeout(() => toast.remove(), 500);
+                }
+            }, 6000);
+        </script>
+    </div>
+    """
+    return list_html + notification_html
 
 
 @app.route("/inbox/<drive_file_id>/amend", methods=["POST"])
 def amend_capture(drive_file_id: str):
     """既存の未整理メモに追記。"""
+    conflict = check_drive_lock_and_respond()
+    if conflict:
+        return conflict
+
     append_text = request.form.get("append_text", "")
     inbox_repository.append_capture(drive_file_id, append_text)
 
@@ -481,6 +568,10 @@ def amend_capture(drive_file_id: str):
 @app.route("/inbox/<drive_file_id>/toggle-organized", methods=["POST"])
 def toggle_inbox_organized(drive_file_id: str):
     """整理状態のチェックボックストグル。"""
+    conflict = check_drive_lock_and_respond()
+    if conflict:
+        return conflict
+
     db = database.connect()
     try:
         cur = db.execute(
@@ -555,6 +646,10 @@ def get_attachment(file_id: str):
 @app.route("/rebuild-cache", methods=["POST"])
 def rebuild_cache():
     """Google ドライブの内容からキャッシュSQLite DBを完全同期・再構築する。"""
+    conflict = check_drive_lock_and_respond()
+    if conflict:
+        return conflict
+
     res = knowledge_repository.rebuild_cache_from_gdrive()
     print(f"Rebuild knowledge cache completed: {res}")
 

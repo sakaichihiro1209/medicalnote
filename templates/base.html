@@ -266,17 +266,13 @@
             });
         }
 
-        // FormDataを使った非同期アップロード (アップロード中表示つき)
+        // FormDataを使った非同期アップロード (バックグラウンド化)
         function submitCaptureForm() {
             const textVal = document.getElementById('capture-text').value.trim();
             if (!textVal && selectedFiles.length === 0) {
                 alert('本文または画像を入力してください。');
                 return;
             }
-
-            // ローディング表示を開始
-            const loader = document.getElementById('upload-loading-overlay');
-            if (loader) loader.style.display = 'flex';
 
             const formData = new FormData();
             formData.append('text', textVal);
@@ -291,6 +287,7 @@
                 formData.append('images_lib', file, file.name);
             });
 
+            // バックグラウンド送信を開始し、完了を待たずに即座にモーダルを閉じる
             fetch('/inbox/new', {
                 method: 'POST',
                 body: formData
@@ -303,7 +300,7 @@
                     const tempDiv = document.createElement('div');
                     tempDiv.innerHTML = html;
                     
-                    // OOB要素のスワップ (バッジ更新など)
+                    // OOB要素のスワップ (バッジ更新やトースト表示など)
                     const oobElements = tempDiv.querySelectorAll('[hx-swap-oob]');
                     oobElements.forEach(el => {
                         const targetId = el.getAttribute('id');
@@ -317,14 +314,13 @@
                     container.innerHTML = tempDiv.innerHTML;
                     htmx.process(container);
                 }
-                closeNewCaptureModal();
             })
             .catch(err => {
-                alert('アップロード中にエラーが発生しました: ' + err);
-            })
-            .finally(() => {
-                if (loader) loader.style.display = 'none';
+                console.error('Background upload failed:', err);
             });
+
+            // 待たずに即座にクローズ
+            closeNewCaptureModal();
         }
 
         // Google 連携設定モーダルの制御
@@ -388,5 +384,7 @@
                 });
         }
     </script>
+    <!-- 競合（順番待ち）ダイアログ表示用プレースホルダー -->
+    <div id="conflict-modal" style="display: none;"></div>
 </body>
 </html>
