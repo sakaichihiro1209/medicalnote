@@ -1,0 +1,25 @@
+{% if cards %}
+    {% for card in cards %}
+        <div class="card-item {% if selected_id == card.drive_file_id %}selected{% endif %}"
+             hx-get="{{ url_for('get_card', drive_file_id=card.drive_file_id) }}"
+             hx-target="#detail-pane"
+             hx-swap="innerHTML"
+             onclick="selectCardItem(this)">
+            <span>{{ card.title }}</span>
+            <span class="material-symbols-outlined" style="font-size: 1.1rem; color: var(--color-text-gray);">chevron_right</span>
+        </div>
+    {% endfor %}
+{% else %}
+    <div style="padding: 2rem; text-align: center; color: var(--color-text-gray); font-size: 0.9rem;">
+        カードが見つかりません
+    </div>
+{% endif %}
+
+<script>
+    function selectCardItem(element) {
+        // 既存の選択状態を解除
+        document.querySelectorAll('.card-item').forEach(el => el.classList.remove('selected'));
+        // 選択された要素にクラスを追加
+        element.classList.add('selected');
+    }
+</script>

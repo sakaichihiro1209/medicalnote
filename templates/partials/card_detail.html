@@ -1,0 +1,124 @@
+<div class="detail-header-wrapper">
+    <div style="flex: 1;">
+        <!-- スマホ表示用の一覧に戻るボタン -->
+        <button class="btn btn-secondary" onclick="closeDetail()" style="display: none; padding: 0.35rem 0.65rem; min-height: auto; margin-bottom: 0.75rem;" id="mobile-back-btn">
+            <span class="material-symbols-outlined">arrow_back</span> 戻る
+        </button>
+
+        <h1 class="detail-title">{{ doc.title }}</h1>
+        <div class="detail-metadata">
+            Google Drive File ID: {{ info.drive_file_id }} | 更新日時: {{ info.updated_at }}
+        </div>
+    </div>
+    
+    <div class="detail-toolbar">
+        <button class="btn btn-secondary" onclick="openAddSectionModal()">
+            <span class="material-symbols-outlined">add_box</span> Section追加
+        </button>
+        <button class="btn btn-danger" 
+                hx-delete="{{ url_for('delete_card', drive_file_id=info.drive_file_id) }}"
+                hx-target="#detail-pane"
+                hx-confirm="このカード「{{ doc.title }}」をGoogleドライブおよびキャッシュから本当に削除しますか？">
+            <span class="material-symbols-outlined">delete</span> 削除
+        </button>
+    </div>
+</div>
+
+<!-- Section絞り込みチェックボックス (チップ) -->
+<div class="filter-section">
+    {% for sec in doc.sections %}
+        <div class="filter-chip active" onclick="toggleSectionFilter('{{ sec.name }}', this)">
+            <span class="material-symbols-outlined" style="font-size: 1.1rem; margin-right: 0.25rem;">visibility</span>
+            {{ sec.name }}
+        </div>
+    {% endfor %}
+</div>
+
+<!-- Sectionカードグリッド -->
+<div class="card-grid" id="sections-container">
+    {% for sec in doc.sections %}
+        <div id="sec-wrapper-{{ loop.index }}" data-section-name="{{ sec.name }}">
+            {% include 'partials/section_card.html' %}
+        </div>
+    {% endfor %}
+</div>
+
+<!-- モーダル: Section追加 -->
+<div class="modal-overlay" id="add-section-modal" style="display: none;">
+    <div class="modal-content" style="max-width: 500px;">
+        <h3 class="modal-title">セクションの追加</h3>
+        
+        <!-- 新規セクション入力 -->
+        <form hx-post="{{ url_for('add_section', drive_file_id=info.drive_file_id) }}" 
+              hx-target="#detail-pane" 
+              hx-on::after-request="closeAddSectionModal()">
+            <div style="margin-bottom: 1rem;">
+                <label for="new-sec-name" style="font-size: 0.85rem; font-weight: 600; color: var(--color-text-gray); display: block; margin-bottom: 0.35rem;">
+                    セクション名（または下部から選択）
+                </label>
+                <input type="text" name="section_name" class="input-text" id="new-sec-name" required placeholder="例: Rule">
+            </div>
+
+            <!-- 使用頻度順の候補リスト -->
+            <div style="margin-bottom: 1.5rem;">
+                <label style="font-size: 0.85rem; font-weight: 600; color: var(--color-text-gray); display: block; margin-bottom: 0.5rem;">
+                    よく使うセクション候補
+                </label>
+                <div style="display: flex; flex-wrap: wrap; gap: 0.4rem; max-height: 120px; overflow-y: auto; padding: 0.25rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm);">
+                    {% for name in suggested_sections %}
+                        <button type="button" class="filter-chip" onclick="selectSuggestedSection('{{ name }}')" style="font-size: 0.8rem; min-height: 32px;">
+                            {{ name }}
+                        </button>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+                <button type="button" class="btn btn-secondary" onclick="closeAddSectionModal()">キャンセル</button>
+                <button type="submit" class="btn btn-primary">追加</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+    /* モバイル環境用に戻るボタンを表示 */
+    @media (max-width: 768px) {
+        #mobile-back-btn {
+            display: inline-flex !important;
+        }
+    }
+</style>
+
+<script>
+    // モバイル詳細画面のアクティブ化
+    document.getElementById('detail-pane').classList.add('active');
+
+    function openAddSectionModal() {
+        document.getElementById('add-section-modal').style.display = 'flex';
+        document.getElementById('new-sec-name').focus();
+    }
+
+    function closeAddSectionModal() {
+        document.getElementById('add-section-modal').style.display = 'none';
+    }
+
+    function selectSuggestedSection(name) {
+        document.getElementById('new-sec-name').value = name;
+    }
+
+    // Section絞り込みトグル
+    function toggleSectionFilter(secName, chipElement) {
+        chipElement.classList.toggle('active');
+        const isActive = chipElement.classList.contains('active');
+        
+        // visibility アイコンの切り替え
+        const icon = chipElement.querySelector('.material-symbols-outlined');
+        icon.textContent = isActive ? 'visibility' : 'visibility_off';
+
+        // 該当のセクションラッパーを表示/非表示
+        document.querySelectorAll('[data-section-name="' + secName + '"]').forEach(el => {
+            el.style.display = isActive ? 'block' : 'none';
+        });
+    }
+</script>

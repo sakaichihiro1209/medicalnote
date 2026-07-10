@@ -1,0 +1,134 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="app-container">
+    <!-- 左ペイン: Knowledge一覧 & 検索 -->
+    <div class="pane-sidebar">
+        <div class="sidebar-header">
+            <!-- リアルタイム検索 (HTMX) -->
+            <div class="search-box">
+                <input type="text" name="query" class="input-text" placeholder="カードを検索..."
+                       hx-get="{{ url_for('search_cards') }}" hx-trigger="keyup changed delay:200ms"
+                       hx-target="#cards-list-container" id="search-input">
+            </div>
+            <!-- 新規作成ボタン (検索ボックス入力中のみ有効化する制御) -->
+            <button class="btn btn-primary" id="new-card-btn" disabled
+                    onclick="openNewCardModal()">
+                <span class="material-symbols-outlined">add</span> 新規カード
+            </button>
+        </div>
+        
+        <!-- 一覧スクロールコンテナ -->
+        <div class="list-scrollable" id="cards-list-container">
+            {% include 'partials/knowledge_list.html' %}
+        </div>
+    </div>
+
+    <!-- 中央ペイン: 詳細表示エリア -->
+    <div class="pane-main" id="detail-pane">
+        <div class="welcome-container">
+            <span class="material-symbols-outlined welcome-icon">medical_services</span>
+            <h2 class="welcome-title">Medical Knowledge</h2>
+            <p class="welcome-text">左ペインのカードを選択するか、検索して新規作成を行ってください。Googleドライブ上のMarkdownと同期されています。</p>
+        </div>
+    </div>
+
+    <!-- 右ペイン: Inboxメモ -->
+    <div class="pane-inbox-panel hidden" id="inbox-pane" hx-get="{{ url_for('inbox_panel') }}" hx-trigger="load">
+        <!-- ロード中に表示するスピナー -->
+        <div style="padding: 2rem; text-align: center; color: var(--color-text-gray);">
+            <div class="material-symbols-outlined" style="animation: spin 1.5s linear infinite; font-size: 2rem; margin-bottom: 0.5rem;">sync</div>
+            <div>Inboxを読み込み中...</div>
+        </div>
+    </div>
+</div>
+
+<!-- モーダル: 新規カード作成 -->
+<div class="modal-overlay" id="new-card-modal" style="display: none;">
+    <div class="modal-content">
+        <h3 class="modal-title">新規カードの作成</h3>
+        <form hx-post="{{ url_for('new_card') }}" hx-target="#detail-pane" hx-on::after-request="closeNewCardModal()">
+            <input type="text" name="title" class="input-text" id="new-card-title-input" required readonly style="background-color: #f7fafc; margin-bottom: 1.25rem;">
+            <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+                <button type="button" class="btn btn-secondary" onclick="closeNewCardModal()">キャンセル</button>
+                <button type="submit" class="btn btn-primary">作成</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+</style>
+
+<script>
+    const searchInput = document.getElementById('search-input');
+    const newCardBtn = document.getElementById('new-card-btn');
+    const newCardModal = document.getElementById('new-card-modal');
+    const newCardTitleInput = document.getElementById('new-card-title-input');
+
+    // 検索入力時に新規作成ボタンを制御する
+    searchInput.addEventListener('input', function() {
+        const val = searchInput.value.trim();
+        newCardBtn.disabled = val.length === 0;
+    });
+
+    function openNewCardModal() {
+        const val = searchInput.value.trim();
+        if (val) {
+            newCardTitleInput.value = val;
+            newCardModal.style.display = 'flex';
+        }
+    }
+
+    function closeNewCardModal() {
+        newCardModal.style.display = 'none';
+        // 一覧を再取得して、新規作成されたカードを反映させる
+        htmx.trigger('#search-input', 'keyup');
+    }
+</script>
+
+<!-- モーダル: Google 連携設定 -->
+<div class="modal-overlay" id="google-settings-modal" style="display: {% if show_settings_modal %}flex{% else %}none{% endif %};">
+    <div class="modal-content" style="max-width: 450px;">
+        <h3 class="modal-title">Google Drive 連携設定</h3>
+        {% if error_msg %}
+            <div style="background-color: #fff5f5; color: var(--color-danger); padding: 0.75rem; border-radius: var(--radius-sm); font-size: 0.85rem; margin-bottom: 1rem; border: 1px solid #fed7d7; line-height: 1.4;">
+                {{ error_msg }}
+            </div>
+        {% endif %}
+        <p style="font-size: 0.9rem; color: var(--color-text-gray); margin-bottom: 1.25rem; line-height: 1.5;">
+            アプリ内蔵の認証情報を使用して、Google ドライブとの連携を行います。メールアドレスとパスワードによる通常のログイン画面へ進みます。
+        </p>
+        <form action="{{ url_for('save_app_settings') }}" method="POST">
+            <!-- クライアント情報は内部自動設定されるため、隠しパラメータ化 -->
+            <input type="hidden" name="client_id" value="{{ client_id }}">
+            <input type="hidden" name="client_secret" value="{{ client_secret }}">
+
+            <div style="margin-bottom: 1.5rem;">
+                <label for="settings-vault-id" style="font-size: 0.85rem; font-weight: 600; color: var(--color-text-gray); display: block; margin-bottom: 0.35rem;">
+                    GDRIVE_VAULT_FOLDER_ID (任意)
+                </label>
+                <input type="text" name="vault_folder_id" class="input-text" id="settings-vault-id" value="{{ vault_folder_id }}" placeholder="指定しない場合はマイドライブ直下に「Medical_Vault」を自動作成します">
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+                <button type="button" class="btn btn-secondary" onclick="closeGoogleSettingsModal()">閉じる</button>
+                <button type="submit" class="btn btn-primary" style="background-color: #4285F4; border-color: #4285F4;">
+                    Google アカウントでログイン
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    // 起動時にサーバー指示でモーダルを開く処理
+    {% if show_settings_modal %}
+        openGoogleSettingsModal();
+    {% endif %}
+</script>
+{% endblock %}

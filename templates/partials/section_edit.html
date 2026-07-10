@@ -1,0 +1,18 @@
+<form class="edit-form"
+      hx-post="{{ url_for('save_section', drive_file_id=info.drive_file_id, section_name=sec.name) }}"
+      hx-target="#sec-wrapper-{{ index }}"
+      hx-swap="innerHTML">
+    <h3 class="section-card-title" style="margin: 0;">{{ sec.name }} (編集モード)</h3>
+    <textarea name="content" class="edit-textarea" placeholder="本文を入力してください...">{{ sec.content }}</textarea>
+    <input type="hidden" name="index" value="{{ index }}">
+    
+    <div class="edit-actions">
+        <button type="button" class="btn btn-secondary"
+                hx-get="{{ url_for('get_section_card', drive_file_id=info.drive_file_id, section_name=sec.name, index=index) }}"
+                hx-target="#sec-wrapper-{{ index }}"
+                hx-swap="innerHTML">
+            キャンセル
+        </button>
+        <button type="submit" class="btn btn-primary">保存</button>
+    </div>
+</form>

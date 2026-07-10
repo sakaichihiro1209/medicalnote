@@ -1,0 +1,8 @@
+<div class="section-card {{ sec.name | section_color_class }}"
+     hx-get="{{ url_for('edit_section_form', drive_file_id=info.drive_file_id, section_name=sec.name, index=loop.index if loop is defined and loop.index is defined else index) }}"
+     hx-target="#sec-wrapper-{{ loop.index if loop is defined and loop.index is defined else index }}"
+     hx-swap="innerHTML"
+     hx-trigger="click">
+    <h3 class="section-card-title">{{ sec.name }}</h3>
+    <div class="section-card-content">{{ rendered_content | safe if rendered_content is defined else sec.content }}</div>
+</div>

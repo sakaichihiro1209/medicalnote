@@ -1,0 +1,18 @@
+<div class="inbox-header">
+    <h3 style="font-family: var(--font-title); font-size: 1.2rem; font-weight: 600; display: flex; align-items: center; gap: 0.35rem;">
+        <span class="material-symbols-outlined" style="color: var(--color-primary);">mail</span>
+        Inbox
+    </h3>
+    <div style="display: flex; gap: 0.5rem;">
+        <button class="btn btn-secondary" onclick="openNewCaptureModal()" style="padding: 0.4rem 0.8rem; min-height: 38px; font-size: 0.85rem;">
+            <span class="material-symbols-outlined" style="font-size: 1.1rem;">add</span> キャプチャ
+        </button>
+        <button class="btn btn-secondary" onclick="toggleInbox()" style="padding: 0.4rem; min-height: 38px; width: 38px;">
+            <span class="material-symbols-outlined">close</span>
+        </button>
+    </div>
+</div>
+
+<div class="list-scrollable" id="inbox-list-container" style="padding: 1rem;">
+    {% include 'partials/inbox_list.html' %}
+</div>
