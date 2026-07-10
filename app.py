@@ -138,7 +138,11 @@ def google_callback():
         if not flow:
             return "OAuth設定エラー", 500
 
-        flow.fetch_token(authorization_response=request.url)
+        auth_resp = request.url
+        if not ("localhost" in auth_resp or "127.0.0.1" in auth_resp):
+            auth_resp = auth_resp.replace("http://", "https://")
+
+        flow.fetch_token(authorization_response=auth_resp)
         credentials = flow.credentials
 
         if credentials.refresh_token:
