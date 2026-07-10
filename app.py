@@ -83,8 +83,8 @@ def get_oauth_flow() -> Flow | None:
     # コールバックURLを自動決定
     redirect_uri = url_for("google_callback", _external=True)
 
-    # Render.com 等のリバースプロキシ下で HTTPS を強制するための調整
-    if redirect_uri.startswith("http://") and "render.com" in redirect_uri:
+    # ローカル開発環境以外は常にプロトコルを強制的に https:// へ統一する (OAuth仕様対策)
+    if not ("localhost" in redirect_uri or "127.0.0.1" in redirect_uri):
         redirect_uri = redirect_uri.replace("http://", "https://")
 
     return Flow.from_client_config(
