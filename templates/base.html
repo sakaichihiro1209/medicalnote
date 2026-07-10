@@ -149,7 +149,7 @@
                         <!-- カメラで撮影 (capture属性) -->
                         <label class="btn btn-secondary" style="flex: 1; padding: 0.5rem; font-size: 0.8rem; min-height: 38px; cursor: pointer; text-align: center; display: inline-flex; align-items: center; justify-content: center; gap: 0.25rem; border: 1.5px solid var(--color-border); border-radius: var(--radius-md); background: white;">
                             <span class="material-symbols-outlined" style="font-size: 1.1rem; color: var(--color-primary);">photo_camera</span> 写真を撮る
-                            <input type="file" name="images" id="capture-images-cam" accept="image/*" capture="environment" style="display: none;" onchange="updateFileLabel(this, 'cam-count-label')">
+                            <input type="file" name="images" id="capture-images-cam" accept="image/*" capture="environment" multiple style="display: none;" onchange="updateFileLabel(this, 'cam-count-label')">
                         </label>
                     </div>
                     <!-- 選択ファイル名のラベル表示 -->
@@ -278,11 +278,23 @@
                     const badge = document.getElementById('inbox-badge');
                     const drawerBadge = document.getElementById('drawer-inbox-badge');
                     if (data.count > 0) {
-                        if (badge) badge.textContent = data.count;
-                        if (drawerBadge) drawerBadge.textContent = data.count;
+                        if (badge) {
+                            badge.textContent = data.count;
+                            badge.style.display = 'inline-block';
+                        }
+                        if (drawerBadge) {
+                            drawerBadge.textContent = data.count;
+                            drawerBadge.style.display = 'inline-block';
+                        }
                     } else {
-                        if (badge) badge.remove();
-                        if (drawerBadge) drawerBadge.remove();
+                        if (badge) {
+                            badge.textContent = '0';
+                            badge.style.display = 'none';
+                        }
+                        if (drawerBadge) {
+                            drawerBadge.textContent = '0';
+                            drawerBadge.style.display = 'none';
+                        }
                     }
                 });
         }

@@ -8,6 +8,7 @@ from typing import List, Dict, Tuple, Optional
 from . import database
 from . import gdrive_client
 from . import markdown_parser
+from . import settings
 
 
 def rebuild_cache_from_gdrive() -> Dict[str, int]:
@@ -95,8 +96,8 @@ def rebuild_cache_from_gdrive() -> Dict[str, int]:
 
 def list_cards(query: str = "") -> List[Dict]:
     """SQLite キャッシュからカード一覧を取得する。検索文字列 (query) による部分一致に対応。"""
-    # Google ログインしていない状態ではキャッシュを読み込まない
-    if not gdrive_client.get_credentials():
+    # Google ログインしていない状態、または同期が完了するまではキャッシュを読み込まない
+    if not gdrive_client.get_credentials() or settings.get("VAULT_SYNCHRONIZED") != "true":
         return []
 
     db = database.connect()
@@ -116,8 +117,8 @@ def list_cards(query: str = "") -> List[Dict]:
 
 def get_card_by_id(drive_file_id: str) -> Tuple[Optional[markdown_parser.KnowledgeDocument], Optional[Dict]]:
     """指定された ID のカードをキャッシュDB（フォールバックでGoogleドライブ）から読み込んでパースしたオブジェクトとDB情報を取得する。"""
-    # Google ログインしていない状態ではキャッシュを読み込まない
-    if not gdrive_client.get_credentials():
+    # Google ログインしていない状態、または同期が完了するまではキャッシュを読み込まない
+    if not gdrive_client.get_credentials() or settings.get("VAULT_SYNCHRONIZED") != "true":
         return None, None
 
     db = database.connect()

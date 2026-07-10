@@ -20,17 +20,33 @@
         
         <!-- 一覧スクロールコンテナ -->
         <div class="list-scrollable" id="cards-list-container">
-            {% include 'partials/knowledge_list.html' %}
+            {% if google_connected and not vault_synchronized %}
+                <div style="padding: 3rem 1.5rem; text-align: center; color: var(--color-text-gray);">
+                    <div class="material-symbols-outlined" style="animation: spin 1.5s linear infinite; font-size: 2rem; margin-bottom: 0.75rem; color: var(--color-primary);">sync</div>
+                    <div style="font-size: 0.85rem; font-weight: 600;">初回同期・整合性確認中...</div>
+                    <div style="font-size: 0.75rem; margin-top: 0.25rem;">しばらくお待ちください</div>
+                </div>
+            {% else %}
+                {% include 'partials/knowledge_list.html' %}
+            {% endif %}
         </div>
     </div>
 
     <!-- 中央ペイン: 詳細表示エリア -->
     <div class="pane-main" id="detail-pane">
-        <div class="welcome-container">
-            <span class="material-symbols-outlined welcome-icon">medical_services</span>
-            <h2 class="welcome-title">Medical Knowledge</h2>
-            <p class="welcome-text">左ペインのカードを選択するか、検索して新規作成を行ってください。Googleドライブ上のMarkdownと同期されています。</p>
-        </div>
+        {% if google_connected and not vault_synchronized %}
+            <div class="welcome-container">
+                <span class="material-symbols-outlined welcome-icon" style="animation: spin 2.5s linear infinite; color: var(--color-primary);">sync</span>
+                <h2 class="welcome-title">Google ドライブと同期中</h2>
+                <p class="welcome-text">アカウント連携に伴う、データの最初の同期処理（整合性の確認）を行っています。同期が完了すると、自動的にカードが表示されます。完了までしばらくお待ちください...</p>
+            </div>
+        {% else %}
+            <div class="welcome-container">
+                <span class="material-symbols-outlined welcome-icon">medical_services</span>
+                <h2 class="welcome-title">Medical Knowledge</h2>
+                <p class="welcome-text">左ペインのカードを選択するか、検索して新規作成を行ってください。Googleドライブ上のMarkdownと同期されています。</p>
+            </div>
+        {% endif %}
     </div>
 
     <!-- 右ペイン: Inboxメモ -->

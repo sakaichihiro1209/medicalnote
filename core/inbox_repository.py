@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import List, Dict, Tuple, Optional
 from . import database
 from . import gdrive_client
+from . import settings
 
 _INVALID_FS_CHARS = re.compile(r'[\\/:*?"<>|]')
 
@@ -107,8 +108,8 @@ def rebuild_inbox_cache() -> int:
 
 def list_captures() -> List[Dict]:
     """SQLite キャッシュから Inbox の全ファイルリストを取得する。未整理が上、整理済みが下に並びます。"""
-    # Google ログインしていない状態ではキャッシュを読み込まない
-    if not gdrive_client.get_credentials():
+    # Google ログインしていない状態、または同期が完了するまではキャッシュを読み込まない
+    if not gdrive_client.get_credentials() or settings.get("VAULT_SYNCHRONIZED") != "true":
         return []
 
     db = database.connect()

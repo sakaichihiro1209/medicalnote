@@ -85,6 +85,7 @@ def clear_auth_settings() -> None:
     """認証に関わる情報を設定ファイルからクリアする（ログアウト時用）。"""
     settings = load_settings()
     settings.pop("GOOGLE_REFRESH_TOKEN", None)
+    settings.pop("VAULT_SYNCHRONIZED", None)
     try:
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(settings, f, ensure_ascii=False, indent=4)

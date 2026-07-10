@@ -102,6 +102,7 @@ def get_oauth_flow() -> Flow | None:
 @app.route("/login/google")
 def google_login():
     """Google ログイン画面 (OAuth同意) へリダイレクトする。"""
+    settings.set_val("VAULT_SYNCHRONIZED", "false")
     try:
         flow = get_oauth_flow()
         if not flow:
@@ -165,6 +166,8 @@ def google_callback():
             # ナレッジ & Inbox キャッシュの再構築を実行
             knowledge_repository.rebuild_cache_from_gdrive()
             inbox_repository.rebuild_inbox_cache()
+            # 整合性確認完了
+            settings.set_val("VAULT_SYNCHRONIZED", "true")
 
         return redirect(url_for("index"))
     except Exception as e:
@@ -221,10 +224,11 @@ def save_app_settings():
 def index():
     """メイン画面のレンダリング。"""
     google_connected = gdrive_client.get_credentials() is not None
+    vault_synchronized = settings.get("VAULT_SYNCHRONIZED") == "true"
     unorganized_count = 0
     cards = []
 
-    if google_connected:
+    if google_connected and vault_synchronized:
         unorganized_count = inbox_repository.get_unorganized_count()
         cards = knowledge_repository.list_cards()
 
@@ -239,6 +243,7 @@ def index():
     return render_template(
         "index.html",
         google_connected=google_connected,
+        vault_synchronized=vault_synchronized,
         unorganized_inbox_count=unorganized_count,
         cards=cards,
         organize_inbox_id=organize_inbox_id,
@@ -567,6 +572,9 @@ def rebuild_cache():
     # Inbox も一緒にキャッシュ再構築
     inbox_res = inbox_repository.rebuild_inbox_cache()
     print(f"Rebuild inbox cache completed: {inbox_res} files cached.")
+
+    # 整合性が確認されたので同期済みフラグをセット
+    settings.set_val("VAULT_SYNCHRONIZED", "true")
 
     # HTMX のリフレッシュ完了のタイミングで画面全体を再読み込みさせるために
     # クライアントへリダイレクトを指示するヘッダーを設定
