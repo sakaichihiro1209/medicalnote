@@ -10,8 +10,10 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from . import settings
 import threading
+from flask import session, has_request_context
 
-# フォルダ構造のIDキャッシュ（メモリ上。サーバー起動中にキャッシュし毎回のリスト検索を防ぐ）
+# フォルダ構造のIDキャッシュ（メモリ上。ユーザーIDごとの二重構造）
+# { "user_id": { "root": "...", "knowledge": "...", "inbox": "...", "attachments": "..." } }
 _VAULT_STRUCTURE = {}
 
 # スレッドローカルに refresh_token を格納して、非同期ワーカーでの credentials 取得をシームレスにする
@@ -102,11 +104,26 @@ def get_or_create_folder(service, parent_id: str | None, name: str) -> str:
     return folder["id"]
 
 
-def ensure_vault_structure() -> dict | None:
+def ensure_vault_structure(user_id: str | None = None) -> dict | None:
     """Google ドライブ上の Vault フォルダ構造 (My_Vault/{Knowledge,Inbox,Attachments}) を保証する。"""
     global _VAULT_STRUCTURE
-    if _VAULT_STRUCTURE:
-        return _VAULT_STRUCTURE
+    
+    if not user_id and has_request_context():
+        user_id = session.get("google_user_id")
+        
+    if not user_id:
+        try:
+            creds = get_credentials()
+            if creds and creds.refresh_token:
+                user_id = creds.refresh_token[:30]
+        except Exception:
+            pass
+            
+    if not user_id:
+        user_id = "default"
+        
+    if user_id in _VAULT_STRUCTURE:
+        return _VAULT_STRUCTURE[user_id]
 
     service = get_gdrive_service()
     if not service:
@@ -124,15 +141,15 @@ def ensure_vault_structure() -> dict | None:
         inbox_id = get_or_create_folder(service, vault_root_id, "Inbox")
         attachments_id = get_or_create_folder(service, vault_root_id, "Attachments")
 
-        _VAULT_STRUCTURE = {
+        _VAULT_STRUCTURE[user_id] = {
             "root": vault_root_id,
             "knowledge": knowledge_id,
             "inbox": inbox_id,
             "attachments": attachments_id,
         }
-        return _VAULT_STRUCTURE
+        return _VAULT_STRUCTURE[user_id]
     except Exception as e:
-        print(f"Failed to ensure vault structure: {e}")
+        print(f"Failed to ensure vault structure for user {user_id}: {e}")
         return None
 
 
@@ -276,7 +293,12 @@ def delete_file(file_id: str) -> bool:
         return False
 
 
-def clear_vault_cache():
+def clear_vault_cache(user_id: str | None = None):
     """フォルダ構造のキャッシュをリセットする。"""
     global _VAULT_STRUCTURE
-    _VAULT_STRUCTURE.clear()
+    if not user_id and has_request_context():
+        user_id = session.get("google_user_id")
+    if user_id:
+        _VAULT_STRUCTURE.pop(user_id, None)
+    else:
+        _VAULT_STRUCTURE.clear()

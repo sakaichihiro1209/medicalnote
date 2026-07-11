@@ -34,17 +34,42 @@ app = Flask(__name__)
 # Render.com等での本番鍵の取得、無ければデフォルト
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "medical-secret-key-12345")
 
-# ドライブ操作排他ロック & ステータス
+# ドライブ操作排他ロック & ユーザー別アクティブタスク辞書
 DRIVE_LOCK = threading.Lock()
-DRIVE_TASK_ACTIVE = False
-DRIVE_TASK_NAME = None
+DRIVE_TASKS = {}  # { "user_id": { "active": bool, "name": str } }
 
+def is_drive_task_active(user_id: str | None = None) -> bool:
+    """指定されたユーザーのバックグラウンド書き込みタスクが走っているかを取得。"""
+    if not user_id:
+        user_id = session.get("google_user_id")
+    if not user_id:
+        return False
+    with DRIVE_LOCK:
+        return DRIVE_TASKS.get(user_id, {}).get("active", False)
+
+def get_drive_task_name(user_id: str | None = None) -> str:
+    """指定されたユーザーのアクティブタスク名を取得。"""
+    if not user_id:
+        user_id = session.get("google_user_id")
+    if not user_id:
+        return "同期処理"
+    with DRIVE_LOCK:
+        return DRIVE_TASKS.get(user_id, {}).get("name", "同期処理") or "同期処理"
+
+def set_drive_task_status(user_id: str | None, active: bool, name: str | None = None):
+    """指定されたユーザーのタスク状態を更新。"""
+    if not user_id:
+        user_id = session.get("google_user_id")
+    if not user_id:
+        return
+    with DRIVE_LOCK:
+        DRIVE_TASKS[user_id] = {"active": active, "name": name}
 
 def check_drive_lock_and_respond():
     """現在バックグラウンドでドライブ操作が走っている場合、競合回避用のダイアログHTMLを即座に返す。"""
-    global DRIVE_TASK_ACTIVE, DRIVE_TASK_NAME
-    if DRIVE_TASK_ACTIVE:
-        task_desc = DRIVE_TASK_NAME or "同期処理"
+    user_id = session.get("google_user_id")
+    if is_drive_task_active(user_id):
+        task_desc = get_drive_task_name(user_id)
         # OOBスワップで競合モーダルをポップアップさせ、現在の処理は何も行わずに終了する
         conflict_html = f"""
         <div id="conflict-modal" class="modal-overlay" style="display: flex; z-index: 9999;" hx-swap-oob="true">
@@ -516,8 +541,8 @@ def inbox_list():
 @app.route("/inbox/upload-status", methods=["GET"])
 def upload_status():
     """現在バックグラウンドでドライブ書き込み（アップロード等）が走っているかどうかを取得する。"""
-    global DRIVE_TASK_ACTIVE
-    return jsonify({"active": DRIVE_TASK_ACTIVE})
+    user_id = session.get("google_user_id")
+    return jsonify({"active": is_drive_task_active(user_id)})
 
 
 def make_inbox_list_response(captures, user_id=None):
@@ -559,23 +584,19 @@ def new_capture():
     refresh_token = session.get("google_refresh_token")
 
     def bg_upload():
-        global DRIVE_TASK_ACTIVE, DRIVE_TASK_NAME
-        with DRIVE_LOCK:
-            DRIVE_TASK_ACTIVE = True
-            DRIVE_TASK_NAME = "新規メモのアップロード"
-            try:
-                # バックグラウンドスレッド固有のトークンコンテキストをバインド
-                gdrive_client.set_thread_refresh_token(refresh_token)
-                # ドライブへアップロード
-                inbox_repository.create_capture(text, title_hint=title_hint, images=images, user_id=user_id)
-                # 完了後にキャッシュ再スキャン
-                inbox_repository.rebuild_inbox_cache(user_id=user_id)
-                gdrive_client.clear_thread_refresh_token()
-            except Exception as e:
-                print(f"Background upload task failed: {e}")
-            finally:
-                DRIVE_TASK_ACTIVE = False
-                DRIVE_TASK_NAME = None
+        set_drive_task_status(user_id, True, "新規メモのアップロード")
+        try:
+            # バックグラウンドスレッド固有のトークンコンテキストをバインド
+            gdrive_client.set_thread_refresh_token(refresh_token)
+            # ドライブへアップロード
+            inbox_repository.create_capture(text, title_hint=title_hint, images=images, user_id=user_id)
+            # 完了後にキャッシュ再スキャン
+            inbox_repository.rebuild_inbox_cache(user_id=user_id)
+            gdrive_client.clear_thread_refresh_token()
+        except Exception as e:
+            print(f"Background upload task failed: {e}")
+        finally:
+            set_drive_task_status(user_id, False, None)
 
     # 非同期スレッドを起動
     threading.Thread(target=bg_upload).start()
@@ -716,7 +737,26 @@ def rebuild_cache():
 
     # Inbox も一緒にキャッシュ再構築
     inbox_res = inbox_repository.rebuild_inbox_cache(user_id=user_id)
-    print(f"Rebuild inbox cache completed for user {user_id}: {res} files cached.")
+    print(f"Rebuild inbox cache completed for user {user_id}: {inbox_res} files cached.")
+
+    # 整合性の検証（安全ブレーキ）
+    is_empty = knowledge_repository.check_cache_empty(user_id=user_id)
+    restored = res.get("restored", 0) if isinstance(res, dict) else 0
+
+    if restored == 0 and is_empty:
+        # 同期が0件、かつキャッシュも空のままなら、無限リロードを防ぐためリフレッシュしない
+        print(f"Initial sync failed or no notebooks found for user {user_id}. Refusing automatic refresh to prevent loops.")
+        return """
+        <div style="padding: 1.5rem; margin: 1rem; background-color: #fff5f5; border: 1.5px dashed var(--color-danger); border-radius: var(--radius-md); text-align: center; color: var(--color-danger);">
+            <div class="material-symbols-outlined" style="font-size: 2.5rem; margin-bottom: 0.5rem;">warning</div>
+            <div style="font-weight: bold; font-size: 0.95rem; margin-bottom: 0.25rem;">ノートが見つかりませんでした</div>
+            <div style="font-size: 0.8rem; line-height: 1.5; opacity: 0.85;">
+                Google ドライブの「My_Vault/Knowledge」フォルダ内に Markdown ファイルが1件も存在しないか、権限エラーが発生しています。<br>
+                マイドライブに「My_Vault」フォルダが自動作成されているか、またその中にノートファイル（.md）があるかご確認ください。<br>
+                接続をやり直す場合は、一度ログアウトして再試行してください。
+            </div>
+        </div>
+        """, 200
 
     # 整合性が確認されたので同期済みフラグをセット
     session["vault_synchronized"] = "true"
