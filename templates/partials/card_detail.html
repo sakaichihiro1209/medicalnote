@@ -38,7 +38,13 @@
 <div class="card-grid" id="sections-container">
     {% for sec in doc.sections %}
         <div id="sec-wrapper-{{ loop.index }}" data-section-name="{{ sec.name }}">
-            {% include 'partials/section_card.html' %}
+            {% if edit_section == sec.name %}
+                {% with sec=sec, info=info, index=loop.index %}
+                    {% include 'partials/section_edit.html' %}
+                {% endwith %}
+            {% else %}
+                {% include 'partials/section_card.html' %}
+            {% endif %}
         </div>
     {% endfor %}
 </div>

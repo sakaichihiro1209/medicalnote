@@ -38,10 +38,11 @@ body {
   font-family: var(--font-primary);
   background: var(--color-bg-gradient);
   color: var(--color-text-dark);
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 
 header {
@@ -131,7 +132,7 @@ header {
 .app-container {
   display: flex;
   flex: 1;
-  height: calc(100vh - 65px);
+  min-height: 0;
   position: relative;
   overflow: hidden; /* ペインの枠外押し出しによる不要なスクロールを抑止 */
 }
@@ -608,9 +609,9 @@ header {
   .pane-main {
     position: fixed;
     top: 58px;
+    bottom: 0;
     left: 0;
     width: 100%;
-    height: calc(100vh - 58px);
     background: #f7fafc;
     z-index: 40;
     transform: translateX(100%);
@@ -625,9 +626,9 @@ header {
   .pane-inbox-panel {
     position: fixed;
     top: 58px;
+    bottom: 0;
     right: 0;
     width: 100%;
-    height: calc(100vh - 58px);
     z-index: 45;
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }

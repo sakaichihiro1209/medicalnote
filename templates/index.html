@@ -30,6 +30,13 @@
                 {% include 'partials/knowledge_list.html' %}
             {% endif %}
         </div>
+
+        <!-- PC用の新規メモ（かんたんメモ）ボタンを左下に配置 -->
+        <div class="sidebar-footer" style="padding: 1rem; border-top: 1px solid var(--color-border); background: rgba(255, 255, 255, 0.4);">
+            <button class="btn btn-secondary" onclick="openNewCaptureModal()" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.5rem; border: 1.5px solid var(--color-primary); color: var(--color-primary); font-weight: 600; background: white; border-radius: var(--radius-md);">
+                <span class="material-symbols-outlined" style="font-size: 1.25rem;">edit_note</span> 新規メモ
+            </button>
+        </div>
     </div>
 
     <!-- 中央ペイン: 詳細表示エリア -->

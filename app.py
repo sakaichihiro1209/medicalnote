@@ -291,8 +291,13 @@ def get_card(drive_file_id: str):
         return "<div style='padding: 2rem; color: var(--color-danger);'>カードの読み込みに失敗しました</div>"
 
     suggested = knowledge_repository.get_suggested_sections()
+    edit_section = request.args.get("edit_section", "")
     return render_template(
-        "partials/card_detail.html", doc=doc, info=info, suggested_sections=suggested
+        "partials/card_detail.html", 
+        doc=doc, 
+        info=info, 
+        suggested_sections=suggested,
+        edit_section=edit_section
     )
 
 
@@ -449,8 +454,8 @@ def add_section(drive_file_id: str):
     # 使用頻度のカウントアップ
     knowledge_repository.increment_section_usage(sec_name)
 
-    # 追加後の全セクション詳細画面を再ロード
-    return redirect(url_for("get_card", drive_file_id=drive_file_id))
+    # 追加後のノート詳細画面へ、追加されたセクションを編集状態にするパラメータを付与してリダイレクト
+    return redirect(url_for("get_card", drive_file_id=drive_file_id, edit_section=sec_name))
 
 
 # =====================================================================

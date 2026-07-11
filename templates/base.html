@@ -140,6 +140,12 @@
                     <textarea name="text" class="edit-textarea" id="capture-text" style="min-height: 120px;" placeholder="メモ内容を入力..."></textarea>
                 </div>
 
+                <!-- 機密情報に関する赤字の注意書き -->
+                <div style="margin-bottom: 1rem; color: var(--color-danger); font-size: 0.75rem; font-weight: 600; display: flex; align-items: flex-start; gap: 0.25rem; line-height: 1.4;">
+                    <span class="material-symbols-outlined" style="font-size: 1.1rem; flex-shrink: 0; color: var(--color-danger); margin-top: 1px;">warning</span>
+                    <span>ネットワークを通じてあなたのGoogleドライブに保存されるため、機密情報は絶対にアップロードしないでください。</span>
+                </div>
+
                 <div style="margin-bottom: 1.25rem;">
                     <label style="font-size: 0.8rem; font-weight: 600; color: var(--color-text-gray); display: block; margin-bottom: 0.35rem;">
                         画像を添付 / 写真を撮影 (複数追加可能)
@@ -211,7 +217,7 @@
             selectedFiles = [];
             renderPreviews();
             document.getElementById('new-capture-modal').style.display = 'flex';
-            document.getElementById('capture-text').focus();
+            document.getElementById('capture-title-hint').focus();
         }
 
         function closeNewCaptureModal() {
