@@ -18,7 +18,7 @@
         <button class="btn btn-danger" 
                 hx-delete="{{ url_for('delete_card', drive_file_id=info.drive_file_id) }}"
                 hx-target="#detail-pane"
-                hx-confirm="このカード「{{ doc.title }}」をGoogleドライブおよびキャッシュから本当に削除しますか？">
+                hx-confirm="このカード「{{ doc.title }}」を本当に削除しますか？">
             <span class="material-symbols-outlined">delete</span> 削除
         </button>
     </div>

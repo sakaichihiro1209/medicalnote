@@ -52,7 +52,7 @@
         <!-- スマホ用メニュー (ヘッダー右上) -->
         <div class="mobile-nav-buttons" id="mobile-nav-buttons">
             <!-- ワンタッチキャプチャ追加 -->
-            <button class="btn btn-primary" onclick="openNewCaptureModal()" style="padding: 0.4rem; min-height: 38px; width: 38px;" title="ワンタッチキャプチャ">
+            <button class="btn btn-primary" onclick="openNewCaptureModal()" style="padding: 0.4rem; min-height: 38px; width: 38px;" title="かんたんメモ">
                 <span class="material-symbols-outlined">edit_document</span>
             </button>
             <!-- ハンバーガー -->
@@ -106,7 +106,7 @@
     </div>
 
     <!-- スマホ画面右下のワンタッチキャプチャFAB (Floating Action Button) -->
-    <button class="mobile-fab-btn" id="mobile-fab" onclick="openNewCaptureModal()" title="ワンタッチキャプチャ">
+    <button class="mobile-fab-btn" id="mobile-fab" onclick="openNewCaptureModal()" title="かんたんメモ">
         <span class="material-symbols-outlined" style="font-size: 1.8rem;">edit_note</span>
     </button>
 
@@ -122,7 +122,7 @@
                 <div style="font-size: 0.75rem; color: var(--color-text-gray);">完了するまでしばらくお待ちください</div>
             </div>
 
-            <h3 class="modal-title">新規キャプチャ</h3>
+            <h3 class="modal-title">新規メモ</h3>
             
             <form id="new-capture-form" onsubmit="event.preventDefault(); submitCaptureForm();">
                 
@@ -130,7 +130,7 @@
                     <label for="capture-title-hint" style="font-size: 0.8rem; font-weight: 600; color: var(--color-text-gray); display: block; margin-bottom: 0.25rem;">
                         見出し（省略時は本文1行目を使用）
                     </label>
-                    <input type="text" name="title_hint" class="input-text" id="capture-title-hint" placeholder="例: 気管支炎の処方">
+                    <input type="text" name="title_hint" class="input-text" id="capture-title-hint" placeholder="例:内容">
                 </div>
 
                 <div style="margin-bottom: 0.75rem;">
@@ -167,7 +167,7 @@
     <!-- モーダル: 修正（追記） -->
     <div class="modal-overlay" id="amend-capture-modal" style="display: none; z-index: 300;">
         <div class="modal-content" style="max-width: 450px;">
-            <h3 class="modal-title">メモの修正（追記）</h3>
+            <h3 class="modal-title">メモ追記</h3>
             <form id="amend-capture-form" hx-post="" hx-target="#inbox-list-container" hx-on::after-request="closeAmendCaptureModal()">
                 <div style="margin-bottom: 1.25rem;">
                     <label for="amend-text" style="font-size: 0.8rem; font-weight: 600; color: var(--color-text-gray); display: block; margin-bottom: 0.25rem;">
