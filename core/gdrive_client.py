@@ -9,24 +9,35 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 from . import settings
+import threading
 
 # フォルダ構造のIDキャッシュ（メモリ上。サーバー起動中にキャッシュし毎回のリスト検索を防ぐ）
 _VAULT_STRUCTURE = {}
 
+# スレッドローカルに refresh_token を格納して、非同期ワーカーでの credentials 取得をシームレスにする
+_thread_local = threading.local()
 
-def get_credentials() -> Credentials | None:
+def set_thread_refresh_token(token: str | None):
+    _thread_local.refresh_token = token
+
+def clear_thread_refresh_token():
+    if hasattr(_thread_local, "refresh_token"):
+        del _thread_local.refresh_token
+
+def get_credentials(refresh_token: str | None = None) -> Credentials | None:
     """OAuth2 認証用の Credentials を取得する。"""
     client_id = settings.get("GOOGLE_CLIENT_ID")
     client_secret = settings.get("GOOGLE_CLIENT_SECRET")
     
-    # セッション内のリフレッシュトークンを優先（Web画面からの連携を動的にサポートするため）
-    # リクエストコンテキストが存在する場合のみ Flask の session に安全にアクセスする
-    refresh_token = None
-    if has_request_context():
-        try:
-            refresh_token = session.get("google_refresh_token")
-        except Exception:
-            pass
+    # 引数で渡されたトークンを最優先、次点にスレッドローカル、セッション、settings.json
+    if not refresh_token:
+        if hasattr(_thread_local, "refresh_token") and _thread_local.refresh_token:
+            refresh_token = _thread_local.refresh_token
+        elif has_request_context():
+            try:
+                refresh_token = session.get("google_refresh_token")
+            except Exception:
+                pass
 
     if not refresh_token:
         refresh_token = settings.get("GOOGLE_REFRESH_TOKEN")
@@ -44,13 +55,26 @@ def get_credentials() -> Credentials | None:
     )
 
 
-def get_gdrive_service():
+def get_gdrive_service(refresh_token: str | None = None):
     """Drive API サービスインスタンスを構築する。"""
-    creds = get_credentials()
+    creds = get_credentials(refresh_token=refresh_token)
     if not creds:
         return None
     # google-auth ライブラリが期限切れトークンを自動で更新する
     return build("drive", "v3", credentials=creds)
+
+
+def get_user_info(refresh_token: str | None = None) -> dict | None:
+    """現在ログインしているユーザーの一意の情報を取得する。"""
+    service = get_gdrive_service(refresh_token=refresh_token)
+    if not service:
+        return None
+    try:
+        about = service.about().get(fields="user").execute()
+        return about.get("user")
+    except Exception as e:
+        print(f"Error fetching user info from drive: {e}")
+        return None
 
 
 def get_or_create_folder(service, parent_id: str | None, name: str) -> str:

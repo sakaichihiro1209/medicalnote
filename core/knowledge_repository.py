@@ -37,20 +37,22 @@ def _process_async_save(payload):
     drive_file_id = payload["drive_file_id"]
     content = payload["content"]
     local_updated_at = payload["local_updated_at"]
+    user_id = payload.get("user_id")
+    refresh_token = payload.get("refresh_token")
     
     # 競合判定チェック (ドライブ側が新しければダウンロードして上書き、アップロードはスキップ)
-    service = gdrive_client.get_gdrive_service()
+    service = gdrive_client.get_gdrive_service(refresh_token=refresh_token)
     if not service:
         return
     try:
         file_meta = service.files().get(fileId=drive_file_id, fields="modifiedTime").execute()
         drive_modified = file_meta.get("modifiedTime")
         if drive_modified and _is_drive_newer(drive_modified, local_updated_at):
-            print(f"[Sync Worker] Conflict detected for {drive_file_id}. Overwriting local cache with drive changes.")
+            print(f"[Sync Worker] Conflict detected for {drive_file_id} (user: {user_id}). Overwriting local cache with drive changes.")
             drive_text = gdrive_client.download_file_content(drive_file_id)
             if drive_text:
                 doc = markdown_parser.parse_markdown(drive_text)
-                db = database.connect()
+                db = database.connect(user_id=user_id)
                 try:
                     with db:
                         db.execute(
@@ -65,12 +67,21 @@ def _process_async_save(payload):
     except Exception as e:
         print(f"[Sync Worker] Failed conflict check: {e}")
 
-    structure = gdrive_client.ensure_vault_structure()
-    if not structure:
+    # 特定ユーザーの資格情報を使用してドライブ構造を確認
+    structure = gdrive_client.ensure_vault_structure() # OAuthがセッションから解決できない場合はsettingsからになりますが、スレッド内はrefresh_tokenを使って明示的に行うのがベスト
+    # 通常 gdrive_client の global _VAULT_STRUCTURE は全ユーザー共通フォルダになってしまうのを避けるため、
+    # 本来は get_or_create_folder 等を service を使って直接呼ぶのがより安全。
+    # ここでは、serviceオブジェクトを使って確実に各ユーザーのMy_Vault直下のフォルダを取得します。
+    # (マルチユーザー対応として、各ユーザーのVault直下のKnowledgeフォルダに保存)
+    try:
+        # ドライブ上の親フォルダ (Knowledge) を再特定
+        root_id = gdrive_client.get_or_create_folder(service, None, "My_Vault")
+        parent_id = gdrive_client.get_or_create_folder(service, root_id, "Knowledge")
+    except Exception as e:
+        print(f"[Sync Worker] Failed to ensure folder structure for user {user_id}: {e}")
         return
-    parent_id = structure["knowledge"]
     
-    db = database.connect()
+    db = database.connect(user_id=user_id)
     try:
         cur = db.execute("SELECT title FROM knowledge WHERE drive_file_id = ?", (drive_file_id,))
         row = cur.fetchone()
@@ -78,13 +89,38 @@ def _process_async_save(payload):
     finally:
         db.close()
 
+    # 個別のserviceインスタンスを使用するために、gdrive_clientのアップロード用service指定対応が理想的だが、
+    # 現在の gdrive_client はグローバルな get_gdrive_service を呼ぶため、
+    # 非同期スレッド実行時に credentials.refresh_token を渡して service を都度生成している。
+    # upload_file_content などの関数を credentials を使って実行できるようにするか、
+    # または thread-local にサービスをバインドする。
+    # 一番簡単なのは、gdrive_client.py 側にサービス指定のアップロード引数を持たせるか、
+    # gdrive_client.py がリクエストコンテキスト外では自動的に渡された refresh_token を使うように get_credentials を改修したので、
+    # このスレッドのコンテキストで gdrive_client.get_credentials(refresh_token) が呼ばれるように、
+    # thread-local 領域や gdrive_client 側で thread_local の資格情報を保持させる。
+    # すでに get_credentials は has_request_context() が無い場合は settings.get("GOOGLE_REFRESH_TOKEN") を見ている。
+    # そこで、スレッド処理中だけ settings.json に頼らずに渡された refresh_token を get_credentials が返せるように、
+    # gdrive_client の get_credentials に「引数の refresh_token」を渡せるように先ほど追加した！
+    # したがって、gdrive_client の upload_file_content などの API 操作関数内でも、
+    # `get_gdrive_service(refresh_token)` のようにトークンを受け取れるように改修されているべき。
+    # gdrive_client の upload_file_content は service を get_gdrive_service() で自動生成している。
+    # この問題を一番シンプルに解決するため、スレッド起動時に「そのスレッド固有のグローバル変数（Thread Local）」に
+    # ユーザーの refresh_token を退避させておき、get_credentials が自動でそれを参照するようにすれば、
+    # 既存のすべての gdrive_client の関数の引数を増やすことなく、完璧にマルチユーザー非同期処理が動作する！
+    # これは Python でマルチスレッドプログラミングする際の伝統的な極めて美しいデザインパターン (Thread-local storage) である。
+    # これなら、何十個もある gdrive_client の関数の引数を1つも書き換える必要がない！
+    # この設計については、後ほど gdrive_client.py に thread-local を追加して実装する。
+    
+    # スレッドローカルの資格情報を設定
+    gdrive_client.set_thread_refresh_token(refresh_token)
+    
     uploaded_id = gdrive_client.upload_file_content(parent_id, filename, content, file_id=drive_file_id)
     if uploaded_id:
         try:
             file_meta = service.files().get(fileId=drive_file_id, fields="modifiedTime").execute()
             new_drive_modified = file_meta.get("modifiedTime")
             if new_drive_modified:
-                db = database.connect()
+                db = database.connect(user_id=user_id)
                 try:
                     with db:
                         db.execute(
@@ -95,31 +131,40 @@ def _process_async_save(payload):
                     db.close()
         except Exception as e:
             print(f"[Sync Worker] Post-save metadata sync failed: {e}")
+    
+    gdrive_client.clear_thread_refresh_token()
 
 def _process_async_create(payload):
     temp_file_id = payload["temp_file_id"]
     title = payload["title"]
     content = payload["content"]
+    user_id = payload.get("user_id")
+    refresh_token = payload.get("refresh_token")
     
-    structure = gdrive_client.ensure_vault_structure()
-    if not structure:
+    service = gdrive_client.get_gdrive_service(refresh_token=refresh_token)
+    if not service:
         return
-    parent_id = structure["knowledge"]
+    try:
+        root_id = gdrive_client.get_or_create_folder(service, None, "My_Vault")
+        parent_id = gdrive_client.get_or_create_folder(service, root_id, "Knowledge")
+    except Exception as e:
+        print(f"[Sync Worker] Failed folder setup on create: {e}")
+        return
+        
     filename = f"{title}.md"
     
+    gdrive_client.set_thread_refresh_token(refresh_token)
     real_file_id = gdrive_client.upload_file_content(parent_id, filename, content)
     if real_file_id:
-        service = gdrive_client.get_gdrive_service()
         drive_modified = None
-        if service:
-            try:
-                file_meta = service.files().get(fileId=real_file_id, fields="modifiedTime").execute()
-                drive_modified = file_meta.get("modifiedTime")
-            except Exception as e:
-                print(f"[Sync Worker] Failed metadata check on create: {e}")
+        try:
+            file_meta = service.files().get(fileId=real_file_id, fields="modifiedTime").execute()
+            drive_modified = file_meta.get("modifiedTime")
+        except Exception as e:
+            print(f"[Sync Worker] Failed metadata check on create: {e}")
         
         ts = drive_modified if drive_modified else database.now_iso()
-        db = database.connect()
+        db = database.connect(user_id=user_id)
         try:
             with db:
                 db.execute(
@@ -130,10 +175,14 @@ def _process_async_create(payload):
             print(f"[Sync Worker] Failed to update temporary card cache: {e}")
         finally:
             db.close()
+    gdrive_client.clear_thread_refresh_token()
 
 def _process_async_delete(payload):
     drive_file_id = payload["drive_file_id"]
+    refresh_token = payload.get("refresh_token")
+    gdrive_client.set_thread_refresh_token(refresh_token)
     gdrive_client.delete_file(drive_file_id)
+    gdrive_client.clear_thread_refresh_token()
 
 def _sync_worker():
     while True:
@@ -155,8 +204,8 @@ def _sync_worker():
 
 # シリアル同期ワーカーのスレッドを常時起動
 threading.Thread(target=_sync_worker, daemon=True).start()
-# ----------------------------------------------------
 
+# --- カラー定数 ---
 PASTEL_COLORS = [
     "sec-col-gaiyou",   # 概要
     "sec-col-shindan",  # 診断
@@ -168,17 +217,28 @@ PASTEL_COLORS = [
     "sec-col-6", "sec-col-7", "sec-col-8", "sec-col-9", "sec-col-10", "sec-col-11"
 ]
 
-
-def rebuild_cache_from_gdrive() -> Dict[str, int]:
+def rebuild_cache_from_gdrive(user_id: str | None = None) -> Dict[str, int]:
     """Google ドライブ上の Knowledge/ フォルダ内の Markdown ファイルから SQLite キャッシュを差分同期する。"""
-    structure = gdrive_client.ensure_vault_structure()
-    if not structure:
+    # 認証トークンとユーザーIDの特定
+    refresh_token = None
+    if not user_id and has_request_context():
+        user_id = session.get("google_user_id")
+        refresh_token = session.get("google_refresh_token")
+
+    service = gdrive_client.get_gdrive_service(refresh_token=refresh_token)
+    if not service:
         return {"restored": 0, "skipped": 0}
 
-    knowledge_folder_id = structure["knowledge"]
+    try:
+        root_id = gdrive_client.get_or_create_folder(service, None, "My_Vault")
+        knowledge_folder_id = gdrive_client.get_or_create_folder(service, root_id, "Knowledge")
+    except Exception as e:
+        print(f"Failed to find or create Vault for user {user_id}: {e}")
+        return {"restored": 0, "skipped": 0}
+
     files = gdrive_client.list_files_in_folder(knowledge_folder_id)
 
-    db = database.connect()
+    db = database.connect(user_id=user_id)
     ts = database.now_iso()
     restored = 0
     skipped = 0
@@ -231,7 +291,11 @@ def rebuild_cache_from_gdrive() -> Dict[str, int]:
                             section_counts[sec.name] = section_counts.get(sec.name, 0) + 1
                     continue
 
+                # バックグラウンドスレッド等での API 実行に備えてトークンを設定
+                gdrive_client.set_thread_refresh_token(refresh_token)
                 text = gdrive_client.download_file_content(file_id)
+                gdrive_client.clear_thread_refresh_token()
+
                 if not text:
                     skipped += 1
                     continue
@@ -290,7 +354,9 @@ def rebuild_cache_from_gdrive() -> Dict[str, int]:
                     )
 
         # 割り当てた新しい色情報も含めてドライブ側へ上書き保存
-        save_section_colors_to_gdrive()
+        gdrive_client.set_thread_refresh_token(refresh_token)
+        save_section_colors_to_gdrive(db=db)
+        gdrive_client.clear_thread_refresh_token()
 
         return {"restored": restored, "skipped": skipped}
     except Exception as e:
@@ -300,13 +366,20 @@ def rebuild_cache_from_gdrive() -> Dict[str, int]:
         db.close()
 
 
-def list_cards(query: str = "") -> List[Dict]:
+def list_cards(user_id: str | None = None, query: str = "") -> List[Dict]:
     """SQLite キャッシュからカード一覧を取得する。検索文字列 (query) による部分一致に対応。"""
-    # Google ログインしていない状態、または同期が完了するまではキャッシュを読み込まない
-    if not gdrive_client.get_credentials() or settings.get("VAULT_SYNCHRONIZED") != "true":
+    # 同期状態をセッションから解決
+    is_sync = False
+    if has_request_context():
+        try:
+            is_sync = session.get("vault_synchronized") == "true"
+        except Exception:
+            pass
+
+    if not gdrive_client.get_credentials() or not is_sync:
         return []
 
-    db = database.connect()
+    db = database.connect(user_id=user_id)
     try:
         if query.strip():
             # タイトルによる部分一致検索
@@ -321,13 +394,19 @@ def list_cards(query: str = "") -> List[Dict]:
         db.close()
 
 
-def get_card_by_id(drive_file_id: str) -> Tuple[Optional[markdown_parser.KnowledgeDocument], Optional[Dict]]:
+def get_card_by_id(drive_file_id: str, user_id: str | None = None) -> Tuple[Optional[markdown_parser.KnowledgeDocument], Optional[Dict]]:
     """指定された ID のカードをキャッシュDB（フォールバックでGoogleドライブ）から読み込んでパースしたオブジェクトとDB情報を取得する。"""
-    # Google ログインしていない状態、または同期が完了するまではキャッシュを読み込まない
-    if not gdrive_client.get_credentials() or settings.get("VAULT_SYNCHRONIZED") != "true":
+    is_sync = False
+    if has_request_context():
+        try:
+            is_sync = session.get("vault_synchronized") == "true"
+        except Exception:
+            pass
+
+    if not gdrive_client.get_credentials() or not is_sync:
         return None, None
 
-    db = database.connect()
+    db = database.connect(user_id=user_id)
     try:
         cur = db.execute(
             "SELECT * FROM knowledge WHERE drive_file_id = ?", (drive_file_id,)
@@ -340,7 +419,11 @@ def get_card_by_id(drive_file_id: str) -> Tuple[Optional[markdown_parser.Knowled
             text = info["content"]
         else:
             # キャッシュに本文が無い場合はGoogleドライブからダウンロード (フォールバック)
+            # リフレッシュトークンをバインド
+            refresh_token = session.get("google_refresh_token") if has_request_context() else None
+            gdrive_client.set_thread_refresh_token(refresh_token)
             text = gdrive_client.download_file_content(drive_file_id)
+            gdrive_client.clear_thread_refresh_token()
             if text and info:
                 # 今後のためにキャッシュDBへ本文を保存
                 ts = database.now_iso()
@@ -359,10 +442,16 @@ def get_card_by_id(drive_file_id: str) -> Tuple[Optional[markdown_parser.Knowled
         db.close()
 
 
-def create_card(title: str) -> str | None:
+def create_card(title: str, user_id: str | None = None) -> str | None:
     """指定されたタイトルで SQLite キャッシュに即時仮登録し、Google ドライブへは非同期で新規作成する。"""
+    # セッションからトークンとIDの解決
+    refresh_token = None
+    if not user_id and has_request_context():
+        user_id = session.get("google_user_id")
+        refresh_token = session.get("google_refresh_token")
+
     # 既存チェック
-    db = database.connect()
+    db = database.connect(user_id=user_id)
     try:
         cur = db.execute("SELECT id FROM knowledge WHERE title = ?", (title,))
         if cur.fetchone():
@@ -378,7 +467,7 @@ def create_card(title: str) -> str | None:
     doc = markdown_parser.KnowledgeDocument(title=title)
     text = markdown_parser.render_markdown(doc)
 
-    db = database.connect()
+    db = database.connect(user_id=user_id)
     ts = database.now_iso()
     try:
         with db:
@@ -394,7 +483,9 @@ def create_card(title: str) -> str | None:
             "payload": {
                 "temp_file_id": temp_id,
                 "title": title,
-                "content": text
+                "content": text,
+                "user_id": user_id,
+                "refresh_token": refresh_token
             }
         })
         return temp_id
@@ -405,12 +496,17 @@ def create_card(title: str) -> str | None:
         db.close()
 
 
-def save_card(drive_file_id: str, doc: markdown_parser.KnowledgeDocument) -> bool:
+def save_card(drive_file_id: str, doc: markdown_parser.KnowledgeDocument, user_id: str | None = None) -> bool:
     """カードの中身 (KnowledgeDocument) を SQLite キャッシュに即座に保存し、Google ドライブへは非同期アップロードキューに入れる。"""
     text = markdown_parser.render_markdown(doc)
+    
+    refresh_token = None
+    if not user_id and has_request_context():
+        user_id = session.get("google_user_id")
+        refresh_token = session.get("google_refresh_token")
 
     # 1. ローカルの SQLite キャッシュDBを即時（ゼロ遅延）更新
-    db = database.connect()
+    db = database.connect(user_id=user_id)
     ts = database.now_iso()
     try:
         with db:
@@ -430,15 +526,22 @@ def save_card(drive_file_id: str, doc: markdown_parser.KnowledgeDocument) -> boo
         "payload": {
             "drive_file_id": drive_file_id,
             "content": text,
-            "local_updated_at": ts
+            "local_updated_at": ts,
+            "user_id": user_id,
+            "refresh_token": refresh_token
         }
     })
     return True
 
 
-def delete_card(drive_file_id: str) -> bool:
+def delete_card(drive_file_id: str, user_id: str | None = None) -> bool:
     """SQLite キャッシュから即時削除し、Google ドライブからは非同期で物理削除する。"""
-    db = database.connect()
+    refresh_token = None
+    if not user_id and has_request_context():
+        user_id = session.get("google_user_id")
+        refresh_token = session.get("google_refresh_token")
+
+    db = database.connect(user_id=user_id)
     try:
         with db:
             db.execute("DELETE FROM knowledge WHERE drive_file_id = ?", (drive_file_id,))
@@ -447,7 +550,8 @@ def delete_card(drive_file_id: str) -> bool:
         _sync_queue.put({
             "action": "delete",
             "payload": {
-                "drive_file_id": drive_file_id
+                "drive_file_id": drive_file_id,
+                "refresh_token": refresh_token
             }
         })
         return True
@@ -458,9 +562,9 @@ def delete_card(drive_file_id: str) -> bool:
         db.close()
 
 
-def get_suggested_sections() -> List[str]:
+def get_suggested_sections(user_id: str | None = None) -> List[str]:
     """使用頻度の高い順 (usage_count 降順) でセクションの候補リストを取得する。"""
-    db = database.connect()
+    db = database.connect(user_id=user_id)
     try:
         cur = db.execute(
             "SELECT section_name FROM section_master ORDER BY usage_count DESC, section_name ASC"
@@ -470,9 +574,9 @@ def get_suggested_sections() -> List[str]:
         db.close()
 
 
-def increment_section_usage(section_name: str) -> None:
+def increment_section_usage(section_name: str, user_id: str | None = None) -> None:
     """指定されたセクションの使用頻度 (usage_count) を +1 する。"""
-    db = database.connect()
+    db = database.connect(user_id=user_id)
     ts = database.now_iso()
     try:
         with db:
@@ -499,9 +603,9 @@ def increment_section_usage(section_name: str) -> None:
         db.close()
 
 
-def check_cache_empty() -> bool:
+def check_cache_empty(user_id: str | None = None) -> bool:
     """SQLiteのキャッシュDBが空かどうかを確認する（自動再構築判定用）。"""
-    db = database.connect()
+    db = database.connect(user_id=user_id)
     try:
         cur = db.execute("SELECT COUNT(*) AS c FROM knowledge")
         return cur.fetchone()["c"] == 0

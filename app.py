@@ -119,7 +119,7 @@ def get_oauth_flow() -> Flow | None:
 @app.route("/login/google")
 def google_login():
     """Google ログイン画面 (OAuth同意) へリダイレクトする。"""
-    settings.set_val("VAULT_SYNCHRONIZED", "false")
+    session.pop("vault_synchronized", None)
     try:
         flow = get_oauth_flow()
         if not flow:
@@ -150,7 +150,7 @@ def google_login():
 
 @app.route("/login/google/callback")
 def google_callback():
-    """Google 認証成功時のコールバック。リフレッシュトークンを取得してセッション及び永続ファイルへ保存。"""
+    """Google 認証成功時のコールバック。リフレッシュトークンを取得してセッションへ保存し、個別のDBキャッシュを構築。"""
     try:
         flow = get_oauth_flow()
         if not flow:
@@ -164,27 +164,29 @@ def google_callback():
         credentials = flow.credentials
 
         if credentials.refresh_token:
-            # リフレッシュトークンを暗号化セッションに保存
+            # リフレッシュトークンを暗号化セッションに保存 (settings.jsonには保存しない)
             session["google_refresh_token"] = credentials.refresh_token
-            # 設定ファイル settings.json に永続保存
-            settings.set_val("GOOGLE_REFRESH_TOKEN", credentials.refresh_token)
-            # メモリ上のフォルダ構造キャッシュを破棄して再ロードさせる
-            gdrive_client.clear_vault_cache()
-            # ログインしたアカウントに合わせて古いキャッシュを全クリア (混在防止)
-            db = database.connect()
-            try:
-                with db:
-                    db.execute("DELETE FROM knowledge")
-                    db.execute("DELETE FROM inbox_cache")
-            finally:
-                db.close()
-            # 初回フォルダ構造の構築
-            gdrive_client.ensure_vault_structure()
-            # ナレッジ & Inbox キャッシュの再構築を実行
-            knowledge_repository.rebuild_cache_from_gdrive()
-            inbox_repository.rebuild_inbox_cache()
-            # 整合性確認完了
-            settings.set_val("VAULT_SYNCHRONIZED", "true")
+            
+            # Google ユーザー情報からユニークIDを特定
+            user_info = gdrive_client.get_user_info(refresh_token=credentials.refresh_token)
+            if not user_info:
+                return "Google ユーザー情報の取得に失敗しました", 500
+                
+            user_id = user_info.get("permissionId") or user_info.get("emailAddress")
+            if not user_id:
+                return "Google ユーザーの一意IDが特定できませんでした", 500
+                
+            session["google_user_id"] = user_id
+
+            # ユーザーごとの SQLite キャッシュ DB を初期化・再構築
+            database.init_db(user_id=user_id)
+            
+            # キャッシュの同期実行
+            knowledge_repository.rebuild_cache_from_gdrive(user_id=user_id)
+            inbox_repository.rebuild_inbox_cache(user_id=user_id)
+            
+            # セッションに同期完了フラグをセット
+            session["vault_synchronized"] = "true"
 
         return redirect(url_for("index"))
     except Exception as e:
@@ -201,17 +203,22 @@ def google_callback():
 @app.route("/logout/google")
 def google_logout():
     """セッションの認証情報をクリアして接続を切断する。"""
+    user_id = session.pop("google_user_id", None)
     session.pop("google_refresh_token", None)
+    session.pop("vault_synchronized", None)
+    
     settings.clear_auth_settings()
     gdrive_client.clear_vault_cache()
-    # キャッシュDBも一旦クリア
-    db = database.connect()
-    try:
-        with db:
-            db.execute("DELETE FROM knowledge")
-            db.execute("DELETE FROM inbox_cache")
-    finally:
-        db.close()
+    
+    # ユーザー専用のキャッシュDBファイルを物理的に削除してクリーンアップ
+    if user_id:
+        try:
+            db_path = database.get_db_path(user_id=user_id)
+            if db_path.exists():
+                db_path.unlink()
+        except Exception as e:
+            print(f"Failed to unlink database for user {user_id} on logout: {e}")
+            
     return redirect(url_for("index"))
 
 
@@ -241,13 +248,14 @@ def save_app_settings():
 def index():
     """メイン画面のレンダリング。"""
     google_connected = gdrive_client.get_credentials() is not None
-    vault_synchronized = settings.get("VAULT_SYNCHRONIZED") == "true"
+    vault_synchronized = session.get("vault_synchronized") == "true"
     unorganized_count = 0
     cards = []
 
     if google_connected and vault_synchronized:
-        unorganized_count = inbox_repository.get_unorganized_count()
-        cards = knowledge_repository.list_cards()
+        user_id = session.get("google_user_id")
+        unorganized_count = inbox_repository.get_unorganized_count(user_id=user_id)
+        cards = knowledge_repository.list_cards(user_id=user_id)
 
     # 「Knowledgeに整理する」から遷移してきた場合、自動でサイドバーを展開するパラメータを渡す
     organize_inbox_id = request.args.get("organize_inbox_id")
@@ -274,7 +282,8 @@ def index():
 def search_cards():
     """HTMX 用の部分更新検索エンドポイント。"""
     query = request.args.get("query", "")
-    cards = knowledge_repository.list_cards(query)
+    user_id = session.get("google_user_id")
+    cards = knowledge_repository.list_cards(user_id=user_id, query=query)
     return render_template("partials/knowledge_list.html", cards=cards)
 
 
@@ -286,11 +295,12 @@ def search_cards():
 @app.route("/knowledge/<drive_file_id>")
 def get_card(drive_file_id: str):
     """指定されたカードの詳細 (各セクション) を HTML 断片で返す。"""
-    doc, info = knowledge_repository.get_card_by_id(drive_file_id)
+    user_id = session.get("google_user_id")
+    doc, info = knowledge_repository.get_card_by_id(drive_file_id, user_id=user_id)
     if not doc or not info:
         return "<div style='padding: 2rem; color: var(--color-danger);'>カードの読み込みに失敗しました</div>"
 
-    suggested = knowledge_repository.get_suggested_sections()
+    suggested = knowledge_repository.get_suggested_sections(user_id=user_id)
     edit_section = request.args.get("edit_section", "")
     return render_template(
         "partials/card_detail.html", 
@@ -308,7 +318,8 @@ def new_card():
     if not title:
         return "<div style='padding: 2rem; color: var(--color-danger);'>タイトルが空です</div>", 400
 
-    file_id = knowledge_repository.create_card(title)
+    user_id = session.get("google_user_id")
+    file_id = knowledge_repository.create_card(title, user_id=user_id)
     if not file_id:
         # 同名エラーまたはAPIエラー
         return (
@@ -324,7 +335,8 @@ def new_card():
 @app.route("/knowledge/<drive_file_id>/delete", methods=["DELETE"])
 def delete_card(drive_file_id: str):
     """カードの削除。成功時はウェルカムプレースホルダーを返す。"""
-    success = knowledge_repository.delete_card(drive_file_id)
+    user_id = session.get("google_user_id")
+    success = knowledge_repository.delete_card(drive_file_id, user_id=user_id)
     if not success:
         return "<script>alert('削除に失敗しました。');</script>", 400
 
@@ -353,7 +365,8 @@ def delete_card(drive_file_id: str):
 @app.route("/knowledge/<drive_file_id>/sections/<section_name>/edit")
 def edit_section_form(drive_file_id: str, section_name: str):
     """インライン編集用の textarea 入力フォームを返す。"""
-    doc, info = knowledge_repository.get_card_by_id(drive_file_id)
+    user_id = session.get("google_user_id")
+    doc, info = knowledge_repository.get_card_by_id(drive_file_id, user_id=user_id)
     if not doc or not info:
         return "Error", 404
 
@@ -373,7 +386,8 @@ def edit_section_form(drive_file_id: str, section_name: str):
 @app.route("/knowledge/<drive_file_id>/sections/<section_name>", methods=["GET"])
 def get_section_card(drive_file_id: str, section_name: str):
     """指定されたセクションの閲覧モードのカード HTML 断片を返す（キャンセル時用）。"""
-    doc, info = knowledge_repository.get_card_by_id(drive_file_id)
+    user_id = session.get("google_user_id")
+    doc, info = knowledge_repository.get_card_by_id(drive_file_id, user_id=user_id)
     if not doc or not info:
         return "Error", 404
 
@@ -391,7 +405,8 @@ def get_section_card(drive_file_id: str, section_name: str):
 @app.route("/knowledge/<drive_file_id>/sections/<section_name>", methods=["POST"])
 def save_section(drive_file_id: str, section_name: str):
     """インライン編集の内容を保存し、Googleドライブに書き戻した上でカード表示に戻す。"""
-    doc, info = knowledge_repository.get_card_by_id(drive_file_id)
+    user_id = session.get("google_user_id")
+    doc, info = knowledge_repository.get_card_by_id(drive_file_id, user_id=user_id)
     if not doc or not info:
         return "Error", 404
 
@@ -406,12 +421,12 @@ def save_section(drive_file_id: str, section_name: str):
         return "Section not found", 404
 
     # Google ドライブへの保存とキャッシュ同期
-    success = knowledge_repository.save_card(drive_file_id, doc)
+    success = knowledge_repository.save_card(drive_file_id, doc, user_id=user_id)
     if not success:
         return "<span style='color: var(--color-danger);'>保存に失敗しました</span>", 500
 
     # 使用頻度のカウントアップ
-    knowledge_repository.increment_section_usage(section_name)
+    knowledge_repository.increment_section_usage(section_name, user_id=user_id)
 
     return render_template(
         "partials/section_card.html", sec=section, info=info, index=index
@@ -421,7 +436,8 @@ def save_section(drive_file_id: str, section_name: str):
 @app.route("/knowledge/<drive_file_id>/sections/add", methods=["POST"])
 def add_section(drive_file_id: str):
     """セクションをカードへ追加し、上書き保存する。同名がある場合はエラー。"""
-    doc, info = knowledge_repository.get_card_by_id(drive_file_id)
+    user_id = session.get("google_user_id")
+    doc, info = knowledge_repository.get_card_by_id(drive_file_id, user_id=user_id)
     if not doc or not info:
         return "Error", 404
 
@@ -435,12 +451,12 @@ def add_section(drive_file_id: str):
 
     # 新規セクションの追加
     doc.sections.append(markdown_parser.Section(name=sec_name, content=""))
-    success = knowledge_repository.save_card(drive_file_id, doc)
+    success = knowledge_repository.save_card(drive_file_id, doc, user_id=user_id)
     if not success:
         return "<script>alert('追加に失敗しました。');</script>", 500
 
     # 使用頻度のカウントアップ
-    knowledge_repository.increment_section_usage(sec_name)
+    knowledge_repository.increment_section_usage(sec_name, user_id=user_id)
 
     # 追加後のノート詳細画面へ、追加されたセクションを編集状態にするパラメータを付与してリダイレクト
     return redirect(url_for("get_card", drive_file_id=drive_file_id, edit_section=sec_name))
@@ -454,14 +470,16 @@ def add_section(drive_file_id: str):
 @app.route("/inbox/panel")
 def inbox_panel():
     """Inbox パネル全体 (Jinja2) を返す。"""
-    captures = inbox_repository.list_captures()
+    user_id = session.get("google_user_id")
+    captures = inbox_repository.list_captures(user_id=user_id)
     return render_template("partials/inbox_panel.html", captures=captures)
 
 
 @app.route("/inbox/list")
 def inbox_list():
     """Inbox のメモカードリスト部分のみを返す。"""
-    captures = inbox_repository.list_captures()
+    user_id = session.get("google_user_id")
+    captures = inbox_repository.list_captures(user_id=user_id)
     return render_template("partials/inbox_list.html", captures=captures)
 
 
@@ -472,10 +490,10 @@ def upload_status():
     return jsonify({"active": DRIVE_TASK_ACTIVE})
 
 
-def make_inbox_list_response(captures):
+def make_inbox_list_response(captures, user_id=None):
     """リストHTMLとバッジ更新OOB用HTMLを結合して返却する。"""
     list_html = render_template("partials/inbox_list.html", captures=captures)
-    unorganized_count = inbox_repository.get_unorganized_count()
+    unorganized_count = inbox_repository.get_unorganized_count(user_id=user_id)
     if unorganized_count > 0:
         badge_html = f'<span class="badge" id="inbox-badge" hx-swap-oob="true" style="display: inline-block;">{unorganized_count}</span>'
         drawer_badge_html = f'<span class="badge" id="drawer-inbox-badge" hx-swap-oob="true" style="display: inline-block;">{unorganized_count}</span>'
@@ -507,16 +525,22 @@ def new_capture():
                     images.append((f.filename, f.read()))
 
     # バックグラウンドスレッドの処理ロジック
+    user_id = session.get("google_user_id")
+    refresh_token = session.get("google_refresh_token")
+
     def bg_upload():
         global DRIVE_TASK_ACTIVE, DRIVE_TASK_NAME
         with DRIVE_LOCK:
             DRIVE_TASK_ACTIVE = True
             DRIVE_TASK_NAME = "新規メモのアップロード"
             try:
+                # バックグラウンドスレッド固有のトークンコンテキストをバインド
+                gdrive_client.set_thread_refresh_token(refresh_token)
                 # ドライブへアップロード
-                inbox_repository.create_capture(text, title_hint=title_hint, images=images)
+                inbox_repository.create_capture(text, title_hint=title_hint, images=images, user_id=user_id)
                 # 完了後にキャッシュ再スキャン
-                inbox_repository.rebuild_inbox_cache()
+                inbox_repository.rebuild_inbox_cache(user_id=user_id)
+                gdrive_client.clear_thread_refresh_token()
             except Exception as e:
                 print(f"Background upload task failed: {e}")
             finally:
@@ -527,8 +551,8 @@ def new_capture():
     threading.Thread(target=bg_upload).start()
 
     # 即座にレスポンスを返す
-    captures = inbox_repository.list_captures()
-    list_html = make_inbox_list_response(captures)
+    captures = inbox_repository.list_captures(user_id=user_id)
+    list_html = make_inbox_list_response(captures, user_id=user_id)
 
     return list_html
 
@@ -541,11 +565,12 @@ def amend_capture(drive_file_id: str):
         return conflict
 
     append_text = request.form.get("append_text", "")
-    inbox_repository.append_capture(drive_file_id, append_text)
+    user_id = session.get("google_user_id")
+    inbox_repository.append_capture(drive_file_id, append_text, user_id=user_id)
 
     # 追記後のリスト表示をリフレッシュ
-    captures = inbox_repository.list_captures()
-    return make_inbox_list_response(captures)
+    captures = inbox_repository.list_captures(user_id=user_id)
+    return make_inbox_list_response(captures, user_id=user_id)
 
 
 @app.route("/inbox/<drive_file_id>/toggle-organized", methods=["POST"])
@@ -555,7 +580,8 @@ def toggle_inbox_organized(drive_file_id: str):
     if conflict:
         return conflict
 
-    db = database.connect()
+    user_id = session.get("google_user_id")
+    db = database.connect(user_id=user_id)
     try:
         cur = db.execute(
             "SELECT organized FROM inbox_cache WHERE drive_file_id = ?",
@@ -564,19 +590,20 @@ def toggle_inbox_organized(drive_file_id: str):
         row = cur.fetchone()
         current = row["organized"] if row else 0
         new_val = 0 if current == 1 else 1
-        inbox_repository.set_organized(drive_file_id, new_val == 1)
+        inbox_repository.set_organized(drive_file_id, new_val == 1, user_id=user_id)
     finally:
         db.close()
 
     # 更新後のリスト表示をリフレッシュ
-    captures = inbox_repository.list_captures()
-    return make_inbox_list_response(captures)
+    captures = inbox_repository.list_captures(user_id=user_id)
+    return make_inbox_list_response(captures, user_id=user_id)
 
 
 @app.route("/inbox/<drive_file_id>/content")
 def get_inbox_content(drive_file_id: str):
     """非同期取得用のキャプチャテキストコンテンツ返却エンドポイント (ローカルキャッシュからロード)。"""
-    db = database.connect()
+    user_id = session.get("google_user_id")
+    db = database.connect(user_id=user_id)
     content = ""
     try:
         cur = db.execute(
@@ -588,7 +615,10 @@ def get_inbox_content(drive_file_id: str):
             content = row["content"]
         else:
             # なければドライブからロード
-            content = gdrive_client.download_file_content(drive_file_id)
+            refresh_token = session.get("google_refresh_token")
+            gdrive_client.set_thread_refresh_token(refresh_token)
+            content = gdrive_client.download_file_content(drive_file_id) or ""
+            gdrive_client.clear_thread_refresh_token()
     finally:
         db.close()
     return jsonify({"content": content})
@@ -597,14 +627,16 @@ def get_inbox_content(drive_file_id: str):
 @app.route("/inbox/unorganized-count")
 def get_unorganized_inbox_count():
     """未整理件数を返す (JSでのバッジ更新同期用)。"""
-    count = inbox_repository.get_unorganized_count()
+    user_id = session.get("google_user_id")
+    count = inbox_repository.get_unorganized_count(user_id=user_id)
     return jsonify({"count": count})
 
 
 @app.route("/knowledge/sync-status", methods=["GET"])
 def get_knowledge_sync_status():
     """現在バックグラウンドで未同期のノート (dirty=1) があるかどうかを返す。"""
-    db = database.connect()
+    user_id = session.get("google_user_id")
+    db = database.connect(user_id=user_id)
     try:
         cur = db.execute("SELECT COUNT(*) AS c FROM knowledge WHERE dirty = 1")
         count = cur.fetchone()["c"]
@@ -648,15 +680,16 @@ def rebuild_cache():
     if conflict:
         return conflict
 
-    res = knowledge_repository.rebuild_cache_from_gdrive()
-    print(f"Rebuild knowledge cache completed: {res}")
+    user_id = session.get("google_user_id")
+    res = knowledge_repository.rebuild_cache_from_gdrive(user_id=user_id)
+    print(f"Rebuild knowledge cache completed for user {user_id}: {res}")
 
     # Inbox も一緒にキャッシュ再構築
-    inbox_res = inbox_repository.rebuild_inbox_cache()
-    print(f"Rebuild inbox cache completed: {inbox_res} files cached.")
+    inbox_res = inbox_repository.rebuild_inbox_cache(user_id=user_id)
+    print(f"Rebuild inbox cache completed for user {user_id}: {res} files cached.")
 
     # 整合性が確認されたので同期済みフラグをセット
-    settings.set_val("VAULT_SYNCHRONIZED", "true")
+    session["vault_synchronized"] = "true"
 
     # HTMX のリフレッシュ完了のタイミングで画面全体を再読み込みさせるために
     # クライアントへリダイレクトを指示するヘッダーを設定

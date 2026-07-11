@@ -25,18 +25,30 @@ def _safe_fragment(text: str, max_len: int = 20) -> str:
     return sanitized[:max_len]
 
 
-def rebuild_inbox_cache() -> int:
+def rebuild_inbox_cache(user_id: str | None = None) -> int:
     """Google ドライブ上の Inbox フォルダから全 Markdown 本文をスキャンし、SQLite キャッシュを再構築する。
     すでに整理済みのファイルは本文のダウンロードを完全にスキップして処理を極限まで高速化します。
     """
-    structure = gdrive_client.ensure_vault_structure()
-    if not structure:
+    from flask import has_request_context, session
+    refresh_token = None
+    if not user_id and has_request_context():
+        user_id = session.get("google_user_id")
+        refresh_token = session.get("google_refresh_token")
+
+    service = gdrive_client.get_gdrive_service(refresh_token=refresh_token)
+    if not service:
         return 0
 
-    inbox_folder_id = structure["inbox"]
+    try:
+        root_id = gdrive_client.get_or_create_folder(service, None, "My_Vault")
+        inbox_folder_id = gdrive_client.get_or_create_folder(service, root_id, "Inbox")
+    except Exception as e:
+        print(f"Failed to find or create Inbox folder for user {user_id}: {e}")
+        return 0
+
     files = gdrive_client.list_files_in_folder(inbox_folder_id)
 
-    db = database.connect()
+    db = database.connect(user_id=user_id)
     restored = 0
     try:
         valid_files = [f for f in files if f.get("name", "").lower().endswith(".md")]
@@ -90,7 +102,9 @@ def rebuild_inbox_cache() -> int:
                 if is_organized == 1:
                     text = ""
                 else:
+                    gdrive_client.set_thread_refresh_token(refresh_token)
                     text = gdrive_client.download_file_content(file_id) or ""
+                    gdrive_client.clear_thread_refresh_token()
 
                 db.execute(
                     "INSERT OR REPLACE INTO inbox_cache (drive_file_id, file_name, title, date_time, content, organized) "
@@ -106,20 +120,27 @@ def rebuild_inbox_cache() -> int:
         db.close()
 
 
-def list_captures() -> List[Dict]:
+def list_captures(user_id: str | None = None) -> List[Dict]:
     """SQLite キャッシュから Inbox の全ファイルリストを取得する。未整理が上、整理済みが下に並びます。"""
-    # Google ログインしていない状態、または同期が完了するまではキャッシュを読み込まない
-    if not gdrive_client.get_credentials() or settings.get("VAULT_SYNCHRONIZED") != "true":
+    from flask import has_request_context, session
+    is_sync = False
+    if has_request_context():
+        try:
+            is_sync = session.get("vault_synchronized") == "true"
+        except Exception:
+            pass
+
+    if not gdrive_client.get_credentials() or not is_sync:
         return []
 
-    db = database.connect()
+    db = database.connect(user_id=user_id)
     try:
         cur = db.execute("SELECT COUNT(*) AS c FROM inbox_cache")
         count = cur.fetchone()["c"]
         if count == 0:
             db.close()
-            rebuild_inbox_cache()
-            db = database.connect()
+            rebuild_inbox_cache(user_id=user_id)
+            db = database.connect(user_id=user_id)
 
         # organized ASC (未整理0 -> 整理済1), file_name DESC (日付最新順) でソート
         cur = db.execute("SELECT * FROM inbox_cache ORDER BY organized ASC, file_name DESC")
@@ -138,11 +159,25 @@ def list_captures() -> List[Dict]:
 
 
 def create_capture(
-    text: str, title_hint: str | None = None, images: List[Tuple[str, bytes]] | None = None
+    text: str, title_hint: str | None = None, images: List[Tuple[str, bytes]] | None = None, user_id: str | None = None
 ) -> str | None:
     """Google ドライブの Inbox/ フォルダに新規キャプチャを保存する。画像は Attachments/ フォルダへ。"""
-    structure = gdrive_client.ensure_vault_structure()
-    if not structure:
+    from flask import has_request_context, session
+    refresh_token = None
+    if not user_id and has_request_context():
+        user_id = session.get("google_user_id")
+        refresh_token = session.get("google_refresh_token")
+
+    service = gdrive_client.get_gdrive_service(refresh_token=refresh_token)
+    if not service:
+        return None
+
+    try:
+        root_id = gdrive_client.get_or_create_folder(service, None, "My_Vault")
+        inbox_folder_id = gdrive_client.get_or_create_folder(service, root_id, "Inbox")
+        attachments_folder_id = gdrive_client.get_or_create_folder(service, root_id, "Attachments")
+    except Exception as e:
+        print(f"Failed folder setup on capture create for user {user_id}: {e}")
         return None
 
     now = datetime.now()
@@ -156,7 +191,7 @@ def create_capture(
     # 1. 添付画像を Attachments フォルダへアップロードし、Markdown リンク (attachment://fileId) を生成
     image_refs = []
     if images:
-        attachments_folder_id = structure["attachments"]
+        gdrive_client.set_thread_refresh_token(refresh_token)
         for i, (original_name, byte_data) in enumerate(images):
             # 競合（スマホから同じファイル名で複数送られた場合など）を避けるためにインデックス付きタイムスタンプを付与
             ext = original_name.split(".")[-1].lower() if "." in original_name else "jpg"
@@ -168,6 +203,7 @@ def create_capture(
             )
             if file_id:
                 image_refs.append(f"![](attachment://{file_id})")
+        gdrive_client.clear_thread_refresh_token()
 
     # 2. Markdown 本文の生成 (Python版完全互換フォーマット)
     content_lines = [
@@ -185,15 +221,16 @@ def create_capture(
     content_lines.append("")
 
     # 3. Google ドライブへアップロード
-    inbox_folder_id = structure["inbox"]
     markdown_content = "\n".join(content_lines)
+    gdrive_client.set_thread_refresh_token(refresh_token)
     file_id = gdrive_client.upload_file_content(inbox_folder_id, filename, markdown_content)
+    gdrive_client.clear_thread_refresh_token()
 
     if not file_id:
         return None
 
     # 4. SQLite キャッシュ DB の整理状態を「未整理 (0)」に初期登録し本文もキャッシュ
-    db = database.connect()
+    db = database.connect(user_id=user_id)
     try:
         with db:
             dt_str = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -210,10 +247,16 @@ def create_capture(
         db.close()
 
 
-def append_capture(drive_file_id: str, append_text: str) -> bool:
+def append_capture(drive_file_id: str, append_text: str, user_id: str | None = None) -> bool:
     """既存のキャプチャの末尾に修正内容を追記し、整理状態を「未整理」に戻す。"""
+    from flask import has_request_context, session
+    refresh_token = None
+    if not user_id and has_request_context():
+        user_id = session.get("google_user_id")
+        refresh_token = session.get("google_refresh_token")
+
     # 1. まずローカルの SQLite キャッシュから既存の content を高速取得
-    db = database.connect()
+    db = database.connect(user_id=user_id)
     existing_content = ""
     try:
         cur = db.execute("SELECT content, file_name FROM inbox_cache WHERE drive_file_id = ?", (drive_file_id,))
@@ -223,7 +266,9 @@ def append_capture(drive_file_id: str, append_text: str) -> bool:
             filename = row["file_name"]
         else:
             # キャッシュに無い場合はドライブからロード
-            existing_content = gdrive_client.download_file_content(drive_file_id)
+            gdrive_client.set_thread_refresh_token(refresh_token)
+            existing_content = gdrive_client.download_file_content(drive_file_id) or ""
+            gdrive_client.clear_thread_refresh_token()
             filename = "amended_capture.md"
     finally:
         db.close()
@@ -239,7 +284,7 @@ def append_capture(drive_file_id: str, append_text: str) -> bool:
     new_content = existing_content.rstrip() + payload
 
     # 2. ローカルキャッシュを即座に更新
-    db = database.connect()
+    db = database.connect(user_id=user_id)
     try:
         with db:
             db.execute(
@@ -252,16 +297,19 @@ def append_capture(drive_file_id: str, append_text: str) -> bool:
         db.close()
 
     # 3. Google ドライブへの上書きはバックグラウンドスレッドで非同期に処理
-    structure = gdrive_client.ensure_vault_structure()
-    if not structure:
-        return False
-    inbox_folder_id = structure["inbox"]
-
     def upload_worker():
         try:
+            service = gdrive_client.get_gdrive_service(refresh_token=refresh_token)
+            if not service:
+                return
+            root_id = gdrive_client.get_or_create_folder(service, None, "My_Vault")
+            inbox_folder_id = gdrive_client.get_or_create_folder(service, root_id, "Inbox")
+            
+            gdrive_client.set_thread_refresh_token(refresh_token)
             gdrive_client.upload_file_content(
                 inbox_folder_id, filename, new_content, file_id=drive_file_id
             )
+            gdrive_client.clear_thread_refresh_token()
         except Exception as e:
             print(f"Background inbox upload failed: {e}")
 
@@ -269,9 +317,9 @@ def append_capture(drive_file_id: str, append_text: str) -> bool:
     return True
 
 
-def set_organized(drive_file_id: str, organized: bool) -> None:
+def set_organized(drive_file_id: str, organized: bool, user_id: str | None = None) -> None:
     """指定されたキャプチャの整理状態を SQLite DB 上で更新する。"""
-    db = database.connect()
+    db = database.connect(user_id=user_id)
     val = 1 if organized else 0
     try:
         with db:
@@ -285,9 +333,9 @@ def set_organized(drive_file_id: str, organized: bool) -> None:
         db.close()
 
 
-def get_unorganized_count() -> int:
+def get_unorganized_count(user_id: str | None = None) -> int:
     """未整理のキャプチャ件数をカウントする (SQLで一瞬で取得)。"""
-    db = database.connect()
+    db = database.connect(user_id=user_id)
     try:
         cur = db.execute("SELECT COUNT(*) AS c FROM inbox_cache WHERE organized = 0")
         return cur.fetchone()["c"]
