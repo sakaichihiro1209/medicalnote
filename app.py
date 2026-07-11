@@ -137,12 +137,17 @@ def google_login():
     except Exception as e:
         import traceback
         err_detail = traceback.format_exc()
-        return render_template(
-            "index.html",
-            google_connected=False,
-            show_settings_modal=True,
-            error_msg=f"Googleへの遷移処理中にエラーが発生しました:\n{e}\n\n{err_detail}",
-        )
+        return f"""
+        <html>
+        <body style="font-family: sans-serif; padding: 2rem; max-width: 800px; margin: 0 auto; line-height: 1.6;">
+            <h2 style="color: var(--color-danger, #e53e3e); margin-bottom: 1rem;">⚠️ 接続開始処理中にエラーが発生しました</h2>
+            <p>Google ログイン開始処理中に以下の問題が発生しました：</p>
+            <pre style="background: #f7fafc; padding: 1.25rem; border-radius: var(--radius-md, 6px); border: 1px solid #e2e8f0; overflow-x: auto; font-family: monospace; font-size: 0.9rem; line-height: 1.4; color: #2d3748;">{e}\n\n{err_detail}</pre>
+            <br>
+            <a href="/" style="display: inline-block; background: #3182ce; color: white; padding: 0.5rem 1.25rem; text-decoration: none; border-radius: 4px; font-weight: bold;">ホームに戻る</a>
+        </body>
+        </html>
+        """, 500
 
 
 @app.route("/login/google/callback")
@@ -189,12 +194,17 @@ def google_callback():
     except Exception as e:
         import traceback
         err_detail = traceback.format_exc()
-        return render_template(
-            "index.html",
-            google_connected=False,
-            show_settings_modal=True,
-            error_msg=f"Google認証コールバック処理中にエラーが発生しました:\n{e}\n\n{err_detail}",
-        )
+        return f"""
+        <html>
+        <body style="font-family: sans-serif; padding: 2rem; max-width: 800px; margin: 0 auto; line-height: 1.6;">
+            <h2 style="color: var(--color-danger, #e53e3e); margin-bottom: 1rem;">⚠️ 認証処理中にエラーが発生しました</h2>
+            <p>Google 認証完了後の初期セットアップ中に以下の問題が発生しました：</p>
+            <pre style="background: #f7fafc; padding: 1.25rem; border-radius: var(--radius-md, 6px); border: 1px solid #e2e8f0; overflow-x: auto; font-family: monospace; font-size: 0.9rem; line-height: 1.4; color: #2d3748;">{e}\n\n{err_detail}</pre>
+            <br>
+            <a href="/" style="display: inline-block; background: #3182ce; color: white; padding: 0.5rem 1.25rem; text-decoration: none; border-radius: 4px; font-weight: bold;">ホームに戻る</a>
+        </body>
+        </html>
+        """, 500
 
 
 @app.route("/logout/google")
