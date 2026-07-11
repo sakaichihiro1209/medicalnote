@@ -332,13 +332,6 @@
                 '<span>' + message + '</span>';
             
             document.body.appendChild(toast);
-            
-            // 8秒後にフェードアウトして削除 (アップロード時間考慮で少し長めに維持)
-            setTimeout(() => {
-                toast.style.transition = 'opacity 0.5s';
-                toast.style.opacity = '0';
-                setTimeout(() => toast.remove(), 500);
-            }, 8000);
         }
 
         // バックグラウンドのアップロード完了を監視して自動リフレッシュするポーリング
