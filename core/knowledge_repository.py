@@ -12,6 +12,7 @@ from . import database
 from . import gdrive_client
 from . import markdown_parser
 from . import settings
+from flask import session, has_request_context
 
 # --- バックグラウンド同期キューとシリアルワーカーの実装 ---
 _sync_queue: queue.Queue = queue.Queue()
