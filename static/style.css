@@ -775,4 +775,15 @@ header {
     background: #f7fafc;
     border: 1px solid var(--color-border);
   }
+
+  /* モバイルキーボード表示時のモーダル位置調整 */
+  .modal-overlay:focus-within {
+    align-items: flex-start !important;
+    padding-top: 1.5rem !important;
+  }
+  .modal-overlay:focus-within .modal-content {
+    margin-top: 0.5rem !important;
+    transform: none !important;
+    transition: margin-top 0.2s ease-in-out;
+  }
 }

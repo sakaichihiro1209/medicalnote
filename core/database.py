@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS knowledge (
     drive_file_id TEXT NOT NULL UNIQUE,
     content TEXT,
     created_at TEXT,
-    updated_at TEXT
+    updated_at TEXT,
+    dirty INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS section_master (
@@ -81,7 +82,7 @@ def init_db() -> None:
             conn.close()
 
             # 古い構造なら削除
-            if (cols and "content" not in cols) or (sec_cols and "color" not in sec_cols):
+            if (cols and "content" not in cols) or (cols and "dirty" not in cols) or (sec_cols and "color" not in sec_cols):
                 print("Old schema detected. Rebuilding SQLite cache DB...")
                 db_path.unlink()
         except Exception as e:

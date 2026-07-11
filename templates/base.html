@@ -209,6 +209,32 @@
             }
         });
 
+        // HTMX リクエスト開始を検知して同期中トーストを表示
+        document.body.addEventListener('htmx:beforeRequest', function(evt) {
+            const path = evt.detail.pathInfo.requestPath;
+            // ノート（Knowledge）の保存・追加・作成、および再スキャン
+            const isKnowledgeWrite = path.includes('/knowledge/') && 
+                (evt.detail.elt.tagName === 'FORM' || 
+                 evt.detail.elt.getAttribute('hx-post') || 
+                 evt.detail.elt.getAttribute('hx-delete'));
+            const isRebuild = path.includes('/rebuild-cache');
+
+            if (isKnowledgeWrite) {
+                showToast("Google ドライブと同期中...");
+                startSyncPolling();
+            } else if (isRebuild) {
+                showToast("Google ドライブと同期中...");
+            }
+        });
+
+        // HTMX リクエスト完了を検知
+        document.body.addEventListener('htmx:afterOnLoad', function(evt) {
+            const path = evt.detail.pathInfo.requestPath;
+            if (path.includes('/rebuild-cache')) {
+                showSuccessToast("ドライブとの同期が完了しました");
+            }
+        });
+
         // 添付写真の一時蓄積配列
         let selectedFiles = [];
 
@@ -340,7 +366,7 @@
             document.body.appendChild(toast);
         }
 
-        // バックグラウンドのアップロード完了を監視して自動リフレッシュするポーリング
+        // バックグラウンドのアップロード完了を監視して自動リフレッシュするポーリング (メモ用)
         function startUploadPolling() {
             let pollCount = 0;
             const pollInterval = setInterval(() => {
@@ -361,6 +387,34 @@
                 // 最大1分（24回）で監視を打ち切る
                 if (pollCount > 24) {
                     clearInterval(pollInterval);
+                }
+            }, 2500);
+        }
+
+        // バックグラウンドの同期完了を監視して自動通知するポーリング (ノート用)
+        let syncPollInterval = null;
+        function startSyncPolling() {
+            if (syncPollInterval) clearInterval(syncPollInterval);
+            
+            let pollCount = 0;
+            syncPollInterval = setInterval(() => {
+                pollCount++;
+                fetch('/knowledge/sync-status')
+                    .then(res => res.json())
+                    .then(data => {
+                        // 未同期の変更が完了した（activeがfalseになった）
+                        if (!data.active) {
+                            clearInterval(syncPollInterval);
+                            showSuccessToast("Google ドライブへ保存しました");
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Sync polling error:', err);
+                    });
+
+                // 最大1分（24回）で監視を打ち切る
+                if (pollCount > 24) {
+                    clearInterval(syncPollInterval);
                 }
             }, 2500);
         }

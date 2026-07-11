@@ -304,10 +304,6 @@ def get_card(drive_file_id: str):
 @app.route("/knowledge/new", methods=["POST"])
 def new_card():
     """新規カードの作成。同名がある場合はエラーを返す。"""
-    conflict = check_drive_lock_and_respond()
-    if conflict:
-        return conflict
-
     title = request.form.get("title", "").strip()
     if not title:
         return "<div style='padding: 2rem; color: var(--color-danger);'>タイトルが空です</div>", 400
@@ -395,10 +391,6 @@ def get_section_card(drive_file_id: str, section_name: str):
 @app.route("/knowledge/<drive_file_id>/sections/<section_name>", methods=["POST"])
 def save_section(drive_file_id: str, section_name: str):
     """インライン編集の内容を保存し、Googleドライブに書き戻した上でカード表示に戻す。"""
-    conflict = check_drive_lock_and_respond()
-    if conflict:
-        return conflict
-
     doc, info = knowledge_repository.get_card_by_id(drive_file_id)
     if not doc or not info:
         return "Error", 404
@@ -429,10 +421,6 @@ def save_section(drive_file_id: str, section_name: str):
 @app.route("/knowledge/<drive_file_id>/sections/add", methods=["POST"])
 def add_section(drive_file_id: str):
     """セクションをカードへ追加し、上書き保存する。同名がある場合はエラー。"""
-    conflict = check_drive_lock_and_respond()
-    if conflict:
-        return conflict
-
     doc, info = knowledge_repository.get_card_by_id(drive_file_id)
     if not doc or not info:
         return "Error", 404
@@ -611,6 +599,21 @@ def get_unorganized_inbox_count():
     """未整理件数を返す (JSでのバッジ更新同期用)。"""
     count = inbox_repository.get_unorganized_count()
     return jsonify({"count": count})
+
+
+@app.route("/knowledge/sync-status", methods=["GET"])
+def get_knowledge_sync_status():
+    """現在バックグラウンドで未同期のノート (dirty=1) があるかどうかを返す。"""
+    db = database.connect()
+    try:
+        cur = db.execute("SELECT COUNT(*) AS c FROM knowledge WHERE dirty = 1")
+        count = cur.fetchone()["c"]
+        return jsonify({"active": count > 0})
+    except Exception as e:
+        print(f"Error checking sync status: {e}")
+        return jsonify({"active": False})
+    finally:
+        db.close()
 
 
 # =====================================================================
