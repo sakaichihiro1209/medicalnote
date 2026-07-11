@@ -35,16 +35,20 @@ def rebuild_inbox_cache(user_id: str | None = None) -> int:
         user_id = session.get("google_user_id")
         refresh_token = session.get("google_refresh_token")
 
+    if not refresh_token:
+        try:
+            refresh_token = gdrive_client._thread_local.refresh_token
+        except AttributeError:
+            pass
+
     service = gdrive_client.get_gdrive_service(refresh_token=refresh_token)
     if not service:
         return 0
 
-    try:
-        root_id = gdrive_client.get_or_create_folder(service, None, "My_Vault")
-        inbox_folder_id = gdrive_client.get_or_create_folder(service, root_id, "Inbox")
-    except Exception as e:
-        print(f"Failed to find or create Inbox folder for user {user_id}: {e}")
+    structure = gdrive_client.ensure_vault_structure(user_id=user_id)
+    if not structure:
         return 0
+    inbox_folder_id = structure["inbox"]
 
     files = gdrive_client.list_files_in_folder(inbox_folder_id)
 
@@ -168,17 +172,21 @@ def create_capture(
         user_id = session.get("google_user_id")
         refresh_token = session.get("google_refresh_token")
 
+    if not refresh_token:
+        try:
+            refresh_token = gdrive_client._thread_local.refresh_token
+        except AttributeError:
+            pass
+
     service = gdrive_client.get_gdrive_service(refresh_token=refresh_token)
     if not service:
         return None
 
-    try:
-        root_id = gdrive_client.get_or_create_folder(service, None, "My_Vault")
-        inbox_folder_id = gdrive_client.get_or_create_folder(service, root_id, "Inbox")
-        attachments_folder_id = gdrive_client.get_or_create_folder(service, root_id, "Attachments")
-    except Exception as e:
-        print(f"Failed folder setup on capture create for user {user_id}: {e}")
+    structure = gdrive_client.ensure_vault_structure(user_id=user_id)
+    if not structure:
         return None
+    inbox_folder_id = structure["inbox"]
+    attachments_folder_id = structure["attachments"]
 
     now = datetime.now()
     stamp = now.strftime("%Y%m%d_%H%M%S")
@@ -297,15 +305,24 @@ def append_capture(drive_file_id: str, append_text: str, user_id: str | None = N
         db.close()
 
     # 3. Google ドライブへの上書きはバックグラウンドスレッドで非同期に処理
+    if not refresh_token:
+        try:
+            refresh_token = gdrive_client._thread_local.refresh_token
+        except AttributeError:
+            pass
+
     def upload_worker():
         try:
+            # バックグラウンドスレッド固有のトークンコンテキストをバインド
+            gdrive_client.set_thread_refresh_token(refresh_token)
             service = gdrive_client.get_gdrive_service(refresh_token=refresh_token)
             if not service:
                 return
-            root_id = gdrive_client.get_or_create_folder(service, None, "My_Vault")
-            inbox_folder_id = gdrive_client.get_or_create_folder(service, root_id, "Inbox")
+            structure = gdrive_client.ensure_vault_structure(user_id=user_id)
+            if not structure:
+                return
+            inbox_folder_id = structure["inbox"]
             
-            gdrive_client.set_thread_refresh_token(refresh_token)
             gdrive_client.upload_file_content(
                 inbox_folder_id, filename, new_content, file_id=drive_file_id
             )
