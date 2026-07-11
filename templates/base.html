@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Medical Knowledge Manager</title>
+    <title>新人めも</title>
     <!-- HTMX CDN -->
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
@@ -19,7 +19,7 @@
     <header>
         <div class="header-title">
             <span class="material-symbols-outlined">local_hospital</span>
-            MKM
+            新めも
         </div>
         
         <!-- PC/タブレット用メニュー -->
@@ -44,7 +44,7 @@
                 <span class="material-symbols-outlined">sync</span> 再スキャン
             </button>
             <button class="btn btn-secondary" onclick="toggleInbox()">
-                <span class="material-symbols-outlined">mail</span> Inbox
+                <span class="material-symbols-outlined">mail</span> メモ
                 <span class="badge" id="inbox-badge" {% if not unorganized_inbox_count or unorganized_inbox_count == 0 %}style="display: none;"{% endif %}>{{ unorganized_inbox_count if unorganized_inbox_count else 0 }}</span>
             </button>
         </div>
@@ -97,7 +97,7 @@
                 <div class="drawer-section">
                     <h4>メモ管理</h4>
                     <button class="btn btn-secondary drawer-btn" onclick="toggleInbox(); toggleMobileMenu();">
-                        <span class="material-symbols-outlined">mail</span> Inbox（未整理メモ）
+                        <span class="material-symbols-outlined">mail</span> 未整理メモ
                         <span class="badge" id="drawer-inbox-badge" {% if not unorganized_inbox_count or unorganized_inbox_count == 0 %}style="display: none;"{% endif %}>{{ unorganized_inbox_count if unorganized_inbox_count else 0 }}</span>
                     </button>
                 </div>

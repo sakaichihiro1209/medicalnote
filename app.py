@@ -311,12 +311,12 @@ def new_card():
     if not file_id:
         # 同名エラーまたはAPIエラー
         return (
-            f"<script>alert('カード「{title}」は既に存在するか、作成に失敗しました。');</script>"
+            f"<script>alert('ノート「{title}」は既に存在するか、作成に失敗しました。');</script>"
             "<div style='padding: 2rem; color: var(--color-danger);'>作成失敗</div>",
             400,
         )
 
-    # 作成されたカードの詳細画面へリダイレクト（HTMXのターゲットを差し替える）
+    # 作成されたノートの詳細画面へリダイレクト（HTMXのターゲットを差し替える）
     return redirect(url_for("get_card", drive_file_id=file_id))
 
 
@@ -438,7 +438,7 @@ def add_section(drive_file_id: str):
 
     # 重複チェック
     if doc.get_section(sec_name):
-        return f"<script>alert('セクション「{sec_name}」は既にこのカードに存在します。');</script>", 400
+        return f"<script>alert('セクション「{sec_name}」は既にこのノートに存在します。');</script>", 400
 
     # 新規セクションの追加
     doc.sections.append(markdown_parser.Section(name=sec_name, content=""))

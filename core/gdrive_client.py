@@ -79,7 +79,7 @@ def get_or_create_folder(service, parent_id: str | None, name: str) -> str:
 
 
 def ensure_vault_structure() -> dict | None:
-    """Google ドライブ上の Vault フォルダ構造 (Medical_Vault/{Knowledge,Inbox,Attachments}) を保証する。"""
+    """Google ドライブ上の Vault フォルダ構造 (My_Vault/{Knowledge,Inbox,Attachments}) を保証する。"""
     global _VAULT_STRUCTURE
     if _VAULT_STRUCTURE:
         return _VAULT_STRUCTURE
@@ -92,8 +92,8 @@ def ensure_vault_structure() -> dict | None:
         # 1. ルートフォルダIDの確定
         vault_root_id = settings.get("GDRIVE_VAULT_FOLDER_ID")
         if not vault_root_id:
-            # 環境変数指定がない場合は、マイドライブ直下に「Medical_Vault」を自動保証
-            vault_root_id = get_or_create_folder(service, None, "Medical_Vault")
+            # 環境変数指定がない場合は、マイドライブ直下に「My_Vault」を自動保証
+            vault_root_id = get_or_create_folder(service, None, "My_Vault")
 
         # 2. 各サブフォルダの確定
         knowledge_id = get_or_create_folder(service, vault_root_id, "Knowledge")

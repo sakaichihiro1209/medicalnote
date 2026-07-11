@@ -7,14 +7,14 @@
         <div class="sidebar-header">
             <!-- リアルタイム検索 (HTMX) -->
             <div class="search-box">
-                <input type="text" name="query" class="input-text" placeholder="カードを検索..."
+                <input type="text" name="query" class="input-text" placeholder="ノートを検索..."
                        hx-get="{{ url_for('search_cards') }}" hx-trigger="keyup changed delay:200ms"
                        hx-target="#cards-list-container" id="search-input">
             </div>
             <!-- 新規作成ボタン (検索ボックス入力中のみ有効化する制御) -->
             <button class="btn btn-primary" id="new-card-btn" disabled
                     onclick="openNewCardModal()">
-                <span class="material-symbols-outlined">add</span> 新規カード
+                <span class="material-symbols-outlined">add</span> 新規ノート
             </button>
         </div>
         
@@ -38,31 +38,31 @@
             <div class="welcome-container">
                 <span class="material-symbols-outlined welcome-icon" style="animation: spin 2.5s linear infinite; color: var(--color-primary);">sync</span>
                 <h2 class="welcome-title">Google ドライブと同期中</h2>
-                <p class="welcome-text">アカウント連携に伴う、データの最初の同期処理（整合性の確認）を行っています。同期が完了すると、自動的にカードが表示されます。完了までしばらくお待ちください...</p>
+                <p class="welcome-text">アカウント連携に伴う、データの最初の同期処理（整合性の確認）を行っています。同期が完了すると、自動的にノートが表示されます。完了までしばらくお待ちください...</p>
             </div>
         {% else %}
             <div class="welcome-container">
                 <span class="material-symbols-outlined welcome-icon">medical_services</span>
-                <h2 class="welcome-title">Medical Knowledge</h2>
-                <p class="welcome-text">左ペインのカードを選択するか、検索して新規作成を行ってください。Googleドライブ上のMarkdownと同期されています。</p>
+                <h2 class="welcome-title">新人めも</h2>
+                <p class="welcome-text">左ペインのノートを選択するか、検索して新規作成を行ってください。Googleドライブ上のMarkdownと同期されています。</p>
             </div>
         {% endif %}
     </div>
 
-    <!-- 右ペイン: Inboxメモ -->
+    <!-- 右ペイン: メモ -->
     <div class="pane-inbox-panel hidden" id="inbox-pane" hx-get="{{ url_for('inbox_panel') }}" hx-trigger="load">
         <!-- ロード中に表示するスピナー -->
         <div style="padding: 2rem; text-align: center; color: var(--color-text-gray);">
             <div class="material-symbols-outlined" style="animation: spin 1.5s linear infinite; font-size: 2rem; margin-bottom: 0.5rem;">sync</div>
-            <div>Inboxを読み込み中...</div>
+            <div>メモを読み込み中...</div>
         </div>
     </div>
 </div>
 
-<!-- モーダル: 新規カード作成 -->
+<!-- モーダル: 新規ノート作成 -->
 <div class="modal-overlay" id="new-card-modal" style="display: none;">
     <div class="modal-content">
-        <h3 class="modal-title">新規カードの作成</h3>
+        <h3 class="modal-title">新規ノートの作成</h3>
         <form hx-post="{{ url_for('new_card') }}" hx-target="#detail-pane" hx-on::after-request="closeNewCardModal()">
             <input type="text" name="title" class="input-text" id="new-card-title-input" required readonly style="background-color: #f7fafc; margin-bottom: 1.25rem;">
             <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
@@ -102,7 +102,7 @@
 
     function closeNewCardModal() {
         newCardModal.style.display = 'none';
-        // 一覧を再取得して、新規作成されたカードを反映させる
+        // 一覧を再取得して、新規作成されたノートを反映させる
         htmx.trigger('#search-input', 'keyup');
     }
 </script>
