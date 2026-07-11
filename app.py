@@ -69,6 +69,24 @@ def section_color_class(name: str) -> str:
     return knowledge_repository.get_or_create_section_color(name)
 
 
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """アプリ内のすべての未キャッチ例外を捉え、生のエラー情報を画面に表示する。"""
+    import traceback
+    err_detail = traceback.format_exc()
+    return f"""
+    <html>
+    <body style="font-family: sans-serif; padding: 2rem; max-width: 800px; margin: 0 auto; line-height: 1.6;">
+        <h2 style="color: #e53e3e; margin-bottom: 1rem;">⚠️ アプリケーションエラーが発生しました</h2>
+        <p>処理中に以下の未キャッチ例外が発生しました：</p>
+        <pre style="background: #f7fafc; padding: 1.25rem; border-radius: 6px; border: 1px solid #e2e8f0; overflow-x: auto; font-family: monospace; font-size: 0.9rem; line-height: 1.4; color: #2d3748;">{e}\n\n{err_detail}</pre>
+        <br>
+        <a href="/" style="display: inline-block; background: #3182ce; color: white; padding: 0.5rem 1.25rem; text-decoration: none; border-radius: 4px; font-weight: bold;">ホームに戻る</a>
+    </body>
+    </html>
+    """, 500
+
+
 @app.before_request
 def initialize_app():
     """リクエスト処理の前に、ログインユーザー専用のキャッシュDBのテーブル初期化を行う。"""
