@@ -71,15 +71,12 @@ def section_color_class(name: str) -> str:
 
 @app.before_request
 def initialize_app():
-    """リクエスト処理の前にキャッシュDBの初期化と、初回自動スキャンを行う。"""
-    # SQLite キャッシュDBの初期化 (テーブルが無ければ自動作成)
-    database.init_db()
-
-    # キャッシュが空かつ、Google ドライブ連携済みの場合は自動再構築を実行
-    creds = gdrive_client.get_credentials()
-    if creds and knowledge_repository.check_cache_empty():
-        print("Cache is empty. Automatically scanning Google Drive...")
-        knowledge_repository.rebuild_cache_from_gdrive()
+    """リクエスト処理の前に、ログインユーザー専用のキャッシュDBのテーブル初期化を行う。"""
+    user_id = session.get("google_user_id")
+    if user_id:
+        database.init_db(user_id=user_id)
+    else:
+        database.init_db()
 
 
 def get_oauth_flow() -> Flow | None:
@@ -251,9 +248,13 @@ def index():
     vault_synchronized = session.get("vault_synchronized") == "true"
     unorganized_count = 0
     cards = []
+    
+    user_id = session.get("google_user_id")
+    needs_initial_sync = False
+    if google_connected and user_id:
+        needs_initial_sync = knowledge_repository.check_cache_empty(user_id=user_id)
 
     if google_connected and vault_synchronized:
-        user_id = session.get("google_user_id")
         unorganized_count = inbox_repository.get_unorganized_count(user_id=user_id)
         cards = knowledge_repository.list_cards(user_id=user_id)
 
@@ -269,6 +270,7 @@ def index():
         "index.html",
         google_connected=google_connected,
         vault_synchronized=vault_synchronized,
+        needs_initial_sync=needs_initial_sync,
         unorganized_inbox_count=unorganized_count,
         cards=cards,
         organize_inbox_id=organize_inbox_id,

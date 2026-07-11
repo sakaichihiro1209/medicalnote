@@ -1,6 +1,10 @@
 {% extends 'base.html' %}
 
 {% block content %}
+{% if needs_initial_sync %}
+<!-- キャッシュが空の場合、最初のロード後にブラウザ側から非同期で安全に同期を開始させる -->
+<div hx-post="{{ url_for('rebuild_cache') }}" hx-trigger="load" hx-swap="none" style="display: none;"></div>
+{% endif %}
 <div class="app-container">
     <!-- 左ペイン: Knowledge一覧 & 検索 -->
     <div class="pane-sidebar">
