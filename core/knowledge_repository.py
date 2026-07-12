@@ -50,7 +50,7 @@ def _process_async_save(payload):
         drive_modified = file_meta.get("modifiedTime")
         if drive_modified and _is_drive_newer(drive_modified, local_updated_at):
             print(f"[Sync Worker] Conflict detected for {drive_file_id} (user: {user_id}). Overwriting local cache with drive changes.")
-            drive_text = gdrive_client.download_file_content(drive_file_id)
+            drive_text = gdrive_client.download_file_content(drive_file_id, refresh_token=refresh_token)
             if drive_text:
                 doc = markdown_parser.parse_markdown(drive_text)
                 db = database.connect(user_id=user_id)
@@ -69,18 +69,11 @@ def _process_async_save(payload):
         print(f"[Sync Worker] Failed conflict check: {e}")
 
     # 特定ユーザーの資格情報を使用してドライブ構造を確認
-    structure = gdrive_client.ensure_vault_structure() # OAuthがセッションから解決できない場合はsettingsからになりますが、スレッド内はrefresh_tokenを使って明示的に行うのがベスト
-    # 通常 gdrive_client の global _VAULT_STRUCTURE は全ユーザー共通フォルダになってしまうのを避けるため、
-    # 本来は get_or_create_folder 等を service を使って直接呼ぶのがより安全。
-    # ここでは、serviceオブジェクトを使って確実に各ユーザーのMy_Vault直下のフォルダを取得します。
-    # (マルチユーザー対応として、各ユーザーのVault直下のKnowledgeフォルダに保存)
-    try:
-        # ドライブ上の親フォルダ (Knowledge) を再特定
-        root_id = gdrive_client.get_or_create_folder(service, None, "My_Vault")
-        parent_id = gdrive_client.get_or_create_folder(service, root_id, "Knowledge")
-    except Exception as e:
-        print(f"[Sync Worker] Failed to ensure folder structure for user {user_id}: {e}")
+    structure = gdrive_client.ensure_vault_structure(user_id=user_id, refresh_token=refresh_token)
+    if not structure:
+        print(f"[Sync Worker] Failed to resolve Vault structure on async save for user {user_id}")
         return
+    parent_id = structure.get("knowledge")
     
     db = database.connect(user_id=user_id)
     try:
@@ -112,10 +105,7 @@ def _process_async_save(payload):
     # これなら、何十個もある gdrive_client の関数の引数を1つも書き換える必要がない！
     # この設計については、後ほど gdrive_client.py に thread-local を追加して実装する。
     
-    # スレッドローカルの資格情報を設定
-    gdrive_client.set_thread_refresh_token(refresh_token)
-    
-    uploaded_id = gdrive_client.upload_file_content(parent_id, filename, content, file_id=drive_file_id)
+    uploaded_id = gdrive_client.upload_file_content(parent_id, filename, content, file_id=drive_file_id, refresh_token=refresh_token)
     if uploaded_id:
         try:
             file_meta = service.files().get(fileId=drive_file_id, fields="modifiedTime").execute()
@@ -132,15 +122,11 @@ def _process_async_save(payload):
                     db.close()
         except Exception as e:
             print(f"[Sync Worker] Post-save metadata sync failed: {e}")
-    
-    gdrive_client.clear_thread_refresh_token()
 
 def _process_async_delete(payload):
     drive_file_id = payload["drive_file_id"]
     refresh_token = payload.get("refresh_token")
-    gdrive_client.set_thread_refresh_token(refresh_token)
-    gdrive_client.delete_file(drive_file_id)
-    gdrive_client.clear_thread_refresh_token()
+    gdrive_client.delete_file(drive_file_id, refresh_token=refresh_token)
 
 def _sync_worker():
     while True:
@@ -446,9 +432,7 @@ def create_card(title: str, user_id: str | None = None) -> str | None:
     filename = f"{title}.md"
 
     # 即時アップロードしてリアルな file_id を取得
-    gdrive_client.set_thread_refresh_token(refresh_token)
-    real_file_id = gdrive_client.upload_file_content(parent_id, filename, text)
-    gdrive_client.clear_thread_refresh_token()
+    real_file_id = gdrive_client.upload_file_content(parent_id, filename, text, refresh_token=refresh_token)
 
     if not real_file_id:
         print(f"Failed to upload initial card content for {title}")

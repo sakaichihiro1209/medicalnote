@@ -86,6 +86,8 @@ def clear_auth_settings() -> None:
     settings = load_settings()
     settings.pop("GOOGLE_REFRESH_TOKEN", None)
     settings.pop("VAULT_SYNCHRONIZED", None)
+    settings.pop("GDRIVE_VAULT_FOLDER_ID", None)
+    settings.pop("vault_folder_id", None)
     try:
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(settings, f, ensure_ascii=False, indent=4)

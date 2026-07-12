@@ -119,13 +119,28 @@ def ensure_vault_structure(user_id: str | None = None) -> dict | None:
         except Exception:
             pass
             
+def ensure_vault_structure(user_id: str | None = None, refresh_token: str | None = None) -> dict | None:
+    """指定したユーザーの My_Vault フォルダ構造（root, knowledge, inbox, attachments）を保証しIDを返す。"""
+    from flask import session, has_request_context
+    
+    # 引数で指定されたトークンをスレッドローカルに一時設定して後続の folder-lookup で自動で拾えるようにする
+    if refresh_token:
+        set_thread_refresh_token(refresh_token)
+
+    if not user_id:
+        if has_request_context():
+            try:
+                user_id = session.get("google_user_id")
+            except Exception:
+                pass
+            
     if not user_id:
         user_id = "default"
         
     if user_id in _VAULT_STRUCTURE:
         return _VAULT_STRUCTURE[user_id]
 
-    service = get_gdrive_service()
+    service = get_gdrive_service(refresh_token=refresh_token)
     if not service:
         return None
 
@@ -153,9 +168,9 @@ def ensure_vault_structure(user_id: str | None = None) -> dict | None:
         return None
 
 
-def download_file_content(file_id: str) -> str:
+def download_file_content(file_id: str, refresh_token: str | None = None) -> str:
     """指定された ID のテキストファイル (Markdown) をダウンロードして文字列として返す。"""
-    service = get_gdrive_service()
+    service = get_gdrive_service(refresh_token=refresh_token)
     if not service:
         return ""
     try:
@@ -171,9 +186,9 @@ def download_file_content(file_id: str) -> str:
         return ""
 
 
-def download_file_bytes(file_id: str) -> bytes:
+def download_file_bytes(file_id: str, refresh_token: str | None = None) -> bytes:
     """指定された ID のバイナリファイル (画像など) をダウンロードしてバイトデータを返す。"""
-    service = get_gdrive_service()
+    service = get_gdrive_service(refresh_token=refresh_token)
     if not service:
         return b""
     try:
@@ -190,10 +205,10 @@ def download_file_bytes(file_id: str) -> bytes:
 
 
 def upload_file_content(
-    parent_id: str, name: str, content: str, file_id: str | None = None
+    parent_id: str, name: str, content: str, file_id: str | None = None, refresh_token: str | None = None
 ) -> str | None:
     """テキストデータ (Markdown) を新規作成、または既存 ID に上書きアップロードする。"""
-    service = get_gdrive_service()
+    service = get_gdrive_service(refresh_token=refresh_token)
     if not service:
         return None
 
@@ -230,9 +245,10 @@ def upload_file_bytes(
     byte_data: bytes,
     mime_type: str,
     file_id: str | None = None,
+    refresh_token: str | None = None,
 ) -> str | None:
     """バイナリデータ (画像など) を新規作成、または既存 ID に上書きアップロードする。"""
-    service = get_gdrive_service()
+    service = get_gdrive_service(refresh_token=refresh_token)
     if not service:
         return None
 
@@ -262,9 +278,9 @@ def upload_file_bytes(
         return None
 
 
-def list_files_in_folder(folder_id: str) -> list[dict]:
+def list_files_in_folder(folder_id: str, refresh_token: str | None = None) -> list[dict]:
     """指定したフォルダ配下のファイル一覧 (名前, ID) を取得する。"""
-    service = get_gdrive_service()
+    service = get_gdrive_service(refresh_token=refresh_token)
     if not service:
         return []
     try:
@@ -280,9 +296,9 @@ def list_files_in_folder(folder_id: str) -> list[dict]:
         return []
 
 
-def delete_file(file_id: str) -> bool:
+def delete_file(file_id: str, refresh_token: str | None = None) -> bool:
     """指定された ID のファイルを Google ドライブから削除する。"""
-    service = get_gdrive_service()
+    service = get_gdrive_service(refresh_token=refresh_token)
     if not service:
         return False
     try:
