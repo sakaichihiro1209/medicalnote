@@ -80,8 +80,9 @@ def parse_markdown(text: str) -> KnowledgeDocument:
             updated_by = ""
             
             content_cleaned = content.lstrip()
+            # 秒数をオプショナル (?::\d{2})? に変更
             updated_match = re.match(
-                r"^<!--\s*updated:\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s*(?:\((.*?)\))?\s*-->",
+                r"^<!--\s*updated:\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?)\s*(?:\((.*?)\))?\s*-->",
                 content_cleaned
             )
             if updated_match:
@@ -90,6 +91,13 @@ def parse_markdown(text: str) -> KnowledgeDocument:
                 # コメントタグを除去して本文を再取得
                 match_len = updated_match.end()
                 content = content_cleaned[match_len:].strip("\n")
+            
+            # 本文内に残ってしまっている古いスタンプ用コメントを一掃
+            content = re.sub(
+                r"<!--\s*updated:\s*\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?\s*(?:\(.*?\))?\s*-->\n?",
+                "",
+                content
+            )
                 
             sections.append(Section(
                 name=current_name,
