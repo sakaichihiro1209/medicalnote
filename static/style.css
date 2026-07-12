@@ -338,14 +338,14 @@ header {
 
 .section-card-title {
   font-family: var(--font-title);
-  font-size: 1.1rem;
+  font-size: var(--sec-title-size, 1.1rem);
   font-weight: 600;
   margin-bottom: 0.6rem;
   color: var(--sec-text-color, #2d3748);
 }
 
 .section-card-content {
-  font-size: 0.9rem;
+  font-size: var(--sec-font-size, 0.9rem);
   line-height: 1.5;
   white-space: pre-wrap;
 }

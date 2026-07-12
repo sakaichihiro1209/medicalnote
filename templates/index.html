@@ -142,6 +142,17 @@
                 <input type="text" name="user_role" class="input-text" id="settings-user-role" value="{{ user_role or '' }}" placeholder="例: 学生">
             </div>
 
+            <div style="margin-bottom: 1rem;">
+                <label for="settings-font-size" style="font-size: 0.85rem; font-weight: 600; color: var(--color-text-gray); display: block; margin-bottom: 0.35rem;">
+                    文字サイズ (セクションカード)
+                </label>
+                <select name="font_size" class="input-text" id="settings-font-size" style="width: 100%; padding: 0.5rem; border-radius: var(--radius-sm); border: 1px solid var(--color-border); background: white;">
+                    <option value="small" {% if font_size == 'small' %}selected{% endif %}>小 (すっきり)</option>
+                    <option value="medium" {% if font_size == 'medium' or not font_size %}selected{% endif %}>中 (標準)</option>
+                    <option value="large" {% if font_size == 'large' %}selected{% endif %}>大 (読みやすい)</option>
+                </select>
+            </div>
+
             <div style="margin-bottom: 1.5rem;">
                 <label for="settings-vault-id" style="font-size: 0.85rem; font-weight: 600; color: var(--color-text-gray); display: block; margin-bottom: 0.35rem;">
                     GDRIVE_VAULT_FOLDER_ID (任意)

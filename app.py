@@ -331,6 +331,7 @@ def save_app_settings():
     client_secret = request.form.get("client_secret", "").strip()
     vault_folder_id = request.form.get("vault_folder_id", "").strip()
     user_role = request.form.get("user_role", "").strip()
+    font_size = request.form.get("font_size", "medium").strip()
 
     if client_id:
         settings.set_val("GOOGLE_CLIENT_ID", client_id)
@@ -349,8 +350,12 @@ def save_app_settings():
                     "INSERT OR REPLACE INTO user_config (key, value) VALUES ('user_role', ?)",
                     (user_role,)
                 )
+                db.execute(
+                    "INSERT OR REPLACE INTO user_config (key, value) VALUES ('font_size', ?)",
+                    (font_size,)
+                )
         except Exception as e:
-            print(f"Failed to save user_role: {e}")
+            print(f"Failed to save user settings: {e}")
         finally:
             db.close()
         
@@ -399,13 +404,16 @@ def index():
     current_vault_folder_id = settings.get("GDRIVE_VAULT_FOLDER_ID") or ""
 
     user_role = ""
+    font_size = "medium"
     if google_connected and user_id:
         db = database.connect(user_id=user_id)
         try:
-            cur = db.execute("SELECT value FROM user_config WHERE key = 'user_role'")
-            row = cur.fetchone()
-            if row:
-                user_role = row["value"]
+            cur = db.execute("SELECT key, value FROM user_config WHERE key IN ('user_role', 'font_size')")
+            for row in cur.fetchall():
+                if row["key"] == "user_role":
+                    user_role = row["value"]
+                elif row["key"] == "font_size":
+                    font_size = row["value"]
         except Exception:
             pass
         finally:
@@ -423,6 +431,7 @@ def index():
         client_secret=current_client_secret,
         vault_folder_id=current_vault_folder_id,
         user_role=user_role,
+        font_size=font_size,
     )
 
 

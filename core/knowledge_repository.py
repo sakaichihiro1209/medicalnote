@@ -570,8 +570,9 @@ def sync_vault_settings_from_gdrive(user_id: str | None = None, db=None) -> None
     try:
         data = json.loads(text)
         user_role = data.get("user_role", "").strip()
+        font_size = data.get("font_size", "medium").strip()
         colors = data.get("section_colors", {})
-
+ 
         local_db = db or database.connect(user_id=user_id)
         ts = database.now_iso()
         try:
@@ -582,7 +583,13 @@ def sync_vault_settings_from_gdrive(user_id: str | None = None, db=None) -> None
                         "INSERT OR REPLACE INTO user_config (key, value) VALUES ('user_role', ?)",
                         (user_role,)
                     )
-                # 2. セクション色情報を反映
+                # 2. 文字サイズ設定 (font_size) を反映
+                if font_size:
+                    local_db.execute(
+                        "INSERT OR REPLACE INTO user_config (key, value) VALUES ('font_size', ?)",
+                        (font_size,)
+                    )
+                # 3. セクション色情報を反映
                 for name, color in colors.items():
                     cur = local_db.execute("SELECT id FROM section_master WHERE section_name = ?", (name,))
                     row = cur.fetchone()
@@ -619,13 +626,16 @@ def save_vault_settings_to_gdrive(user_id: str | None = None) -> None:
     # 現在の身分情報と色設定をDBから取得
     db = database.connect(user_id=user_id)
     user_role = ""
+    font_size = "medium"
     colors = {}
     try:
-        # 身分情報の取得
-        cur = db.execute("SELECT value FROM user_config WHERE key = 'user_role'")
-        row = cur.fetchone()
-        if row:
-            user_role = row["value"]
+        # 身分情報と文字サイズ設定の取得
+        cur = db.execute("SELECT key, value FROM user_config WHERE key IN ('user_role', 'font_size')")
+        for row in cur.fetchall():
+            if row["key"] == "user_role":
+                user_role = row["value"]
+            elif row["key"] == "font_size":
+                font_size = row["value"]
 
         # セクション色設定の取得
         cur = db.execute("SELECT section_name, color FROM section_master WHERE color IS NOT NULL")
@@ -646,6 +656,7 @@ def save_vault_settings_to_gdrive(user_id: str | None = None) -> None:
 
     content_data = {
         "user_role": user_role,
+        "font_size": font_size,
         "section_colors": colors
     }
     content_str = json.dumps(content_data, ensure_ascii=False, indent=4)

@@ -15,7 +15,15 @@
         }
     </style>
 </head>
-<body>
+<body style="
+  {% if font_size == 'small' %}
+    --sec-font-size: 0.82rem; --sec-title-size: 1.0rem;
+  {% elif font_size == 'large' %}
+    --sec-font-size: 1.05rem; --sec-title-size: 1.25rem;
+  {% else %}
+    --sec-font-size: 0.9rem; --sec-title-size: 1.1rem;
+  {% endif %}
+">
     <header>
         <div class="header-title">
             <span class="material-symbols-outlined">local_hospital</span>
