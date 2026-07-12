@@ -434,7 +434,7 @@ def edit_capture(
             inbox_folder_id = structure["inbox"]
             
             gdrive_client.upload_file_content(
-                inbox_folder_id, filename, upload_content, file_id=drive_file_id
+                inbox_folder_id, filename, upload_content, file_id=drive_file_id, refresh_token=refresh_token
             )
             gdrive_client.clear_thread_refresh_token()
         except Exception as e:
@@ -452,7 +452,24 @@ def set_organized(drive_file_id: str, organized: bool, user_id: str | None = Non
     refresh_token = None
     if not user_id and has_request_context():
         user_id = session.get("google_user_id")
+
+    if has_request_context():
         refresh_token = session.get("google_refresh_token")
+    else:
+        refresh_token = None
+
+    # セッションになければ、DBの user_config から取得するフォールバック
+    if not refresh_token and user_id:
+        db_fallback = database.connect(user_id=user_id)
+        try:
+            cur = db_fallback.execute("SELECT value FROM user_config WHERE key = 'google_refresh_token'")
+            row = cur.fetchone()
+            if row:
+                refresh_token = row["value"]
+        except Exception:
+            pass
+        finally:
+            db_fallback.close()
 
     db = database.connect(user_id=user_id)
     val = 1 if organized else 0
@@ -498,7 +515,7 @@ def set_organized(drive_file_id: str, organized: bool, user_id: str | None = Non
         with db:
             db.execute(
                 "UPDATE inbox_cache SET organized = ?, content = ? WHERE drive_file_id = ?",
-                (val, new_content, drive_file_id),
+                (val, clean_content, drive_file_id),
             )
     except sqlite3.Error as e:
         print(f"Failed to update organized cache for {drive_file_id}: {e}")
@@ -515,7 +532,7 @@ def set_organized(drive_file_id: str, organized: bool, user_id: str | None = Non
             if structure:
                 inbox_folder_id = structure["inbox"]
                 gdrive_client.upload_file_content(
-                    inbox_folder_id, filename, new_content, file_id=drive_file_id
+                    inbox_folder_id, filename, new_content, file_id=drive_file_id, refresh_token=refresh_token
                 )
             gdrive_client.clear_thread_refresh_token()
         except Exception as e:
