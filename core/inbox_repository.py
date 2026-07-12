@@ -386,41 +386,6 @@ def edit_capture(
             print(f"Background inbox upload failed: {e}")
 
     threading.Thread(target=upload_worker, daemon=True).start()
-    return True, organized = 0 WHERE drive_file_id = ?",
-                (new_content, drive_file_id),
-            )
-    except sqlite3.Error as e:
-        print(f"Failed to update inbox cache on append: {e}")
-    finally:
-        db.close()
-
-    # 3. Google ドライブへの上書きはバックグラウンドスレッドで非同期に処理
-    if not refresh_token:
-        try:
-            refresh_token = gdrive_client._thread_local.refresh_token
-        except AttributeError:
-            pass
-
-    def upload_worker():
-        try:
-            # バックグラウンドスレッド固有のトークンコンテキストをバインド
-            gdrive_client.set_thread_refresh_token(refresh_token)
-            service = gdrive_client.get_gdrive_service(refresh_token=refresh_token)
-            if not service:
-                return
-            structure = gdrive_client.ensure_vault_structure(user_id=user_id)
-            if not structure:
-                return
-            inbox_folder_id = structure["inbox"]
-            
-            gdrive_client.upload_file_content(
-                inbox_folder_id, filename, new_content, file_id=drive_file_id
-            )
-            gdrive_client.clear_thread_refresh_token()
-        except Exception as e:
-            print(f"Background inbox upload failed: {e}")
-
-    threading.Thread(target=upload_worker, daemon=True).start()
     return True
 
 
