@@ -269,6 +269,11 @@ def rebuild_cache_from_gdrive(user_id: str | None = None) -> Dict[str, int]:
                     section_counts[sec.name] = section_counts.get(sec.name, 0) + 1
 
                 try:
+                    # 同じタイトルで temp_ から始まる古い仮IDの残骸があれば物理削除してクリーンにする
+                    db.execute(
+                        "DELETE FROM knowledge WHERE title = ? AND drive_file_id LIKE 'temp_%'",
+                        (title,)
+                    )
                     db.execute(
                         "INSERT OR REPLACE INTO knowledge (title, drive_file_id, content, created_at, updated_at, dirty) "
                         "VALUES (?, ?, ?, ?, ?, 0)",
