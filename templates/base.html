@@ -188,9 +188,9 @@
                     <input type="text" id="honki-title" placeholder="本気メモのタイトルを入力..." style="font-size: 1.25rem; font-weight: 700; border: none; background: transparent; outline: none; width: 100%; color: var(--color-text-dark); border-bottom: 2px solid transparent; transition: border-color 0.15s ease;" onfocus="this.style.borderBottomColor='var(--color-primary)'" onblur="this.style.borderBottomColor='transparent'">
                 </div>
                 <div style="display: flex; gap: 0.5rem; align-items: center;">
-                    <button class="btn btn-secondary" onclick="closeHonkiEditor()">キャンセル</button>
-                    <button class="btn btn-primary" onclick="submitHonkiCapture()" style="background-color: var(--color-primary); font-weight: bold; display: flex; align-items: center; gap: 0.35rem;">
-                        <span class="material-symbols-outlined" style="font-size: 1.1rem;">cloud_upload</span> 保存してアップロード
+                    <button class="btn btn-secondary" onclick="closeHonkiEditor(true)">キャンセル</button>
+                    <button class="btn btn-primary" onclick="applyHonkiContent()" style="background-color: var(--color-primary); font-weight: bold; display: flex; align-items: center; gap: 0.35rem;">
+                        <span class="material-symbols-outlined" style="font-size: 1.15rem;">check</span> 完了（メモに反映）
                     </button>
                 </div>
             </div>
@@ -589,12 +589,17 @@
             }, 100);
         }
 
-        function closeHonkiEditor() {
+        function closeHonkiEditor(showSimpleModal = false) {
             document.getElementById('honki-editor-modal').style.display = 'none';
             document.getElementById('honki-title').value = '';
             honkiLines = [""];
             activeRowIndex = 0;
             refreshInboxBadge();
+
+            if (showSimpleModal) {
+                document.getElementById('new-capture-modal').style.display = 'flex';
+                document.getElementById('capture-text').focus();
+            }
         }
 
         // 簡易Markdown行パーサー (HTMLレンダリング用)
@@ -894,52 +899,21 @@
             }
         }
 
-        // 保存とアップロード送信
-        function submitHonkiCapture() {
+        // 完了ボタンを押した時の、かんたんメモモーダルへの流し込み
+        function applyHonkiContent() {
             const titleInput = document.getElementById('honki-title');
             const title = titleInput ? titleInput.value.trim() : '';
             const fullText = honkiLines.join('\n');
 
-            if (!fullText.trim()) {
-                alert("内容が空です。");
-                return;
-            }
+            // 元のかんたんメモモーダルの入力欄へ代入
+            const simpleTitleInput = document.getElementById('capture-title-hint');
+            const simpleTextInput = document.getElementById('capture-text');
+            
+            if (simpleTitleInput) simpleTitleInput.value = title;
+            if (simpleTextInput) simpleTextInput.value = fullText;
 
-            // ローディング表示
-            const overlay = document.getElementById('honki-loading-overlay');
-            if (overlay) overlay.style.display = 'flex';
-
-            const formData = new FormData();
-            formData.append('text', fullText);
-            formData.append('title_hint', title);
-
-            fetch('/inbox/new', {
-                method: 'POST',
-                body: formData
-            })
-            .then(res => res.text())
-            .then(html => {
-                // ローディング解除
-                if (overlay) overlay.style.display = 'none';
-                
-                // 本気メモモーダルを閉じる
-                document.getElementById('honki-editor-modal').style.display = 'none';
-                
-                // 成功トーストの表示
-                showSuccessToast("Google ドライブへメモを保存しました");
-                
-                // 完了後に Inbox リストを更新
-                const inboxContainer = document.getElementById('inbox-list-container');
-                if (inboxContainer) {
-                    inboxContainer.innerHTML = html;
-                }
-                
-                closeHonkiEditor();
-            })
-            .catch(err => {
-                if (overlay) overlay.style.display = 'none';
-                alert("アップロードに失敗しました: " + err);
-            });
+            // 本気メモを閉じて、かんたんメモモーダルを表示する
+            closeHonkiEditor(true);
         }
 
     </script>
