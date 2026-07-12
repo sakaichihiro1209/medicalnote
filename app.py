@@ -800,6 +800,17 @@ def rebuild_cache():
         return conflict
 
     user_id = session.get("google_user_id")
+    
+    # 未完了のままスタックしているキャッシュの同期ロックフラグ (dirty=1) を強制リセット
+    db = database.connect(user_id=user_id)
+    try:
+        with db:
+            db.execute("UPDATE knowledge SET dirty = 0")
+    except Exception as e:
+        print(f"Failed to reset dirty flags on manual rebuild: {e}")
+    finally:
+        db.close()
+
     res = knowledge_repository.rebuild_cache_from_gdrive(user_id=user_id)
     print(f"Rebuild knowledge cache completed for user {user_id}: {res}")
 

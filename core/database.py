@@ -73,9 +73,14 @@ def connect(user_id: str | None = None) -> sqlite3.Connection:
     db_path = get_db_path(user_id=user_id)
     # 親ディレクトリの存在を保証
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # WAL (Write-Ahead Logging) モードを有効化して、読込と書込の並行競合を解消
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+    except sqlite3.Error:
+        pass
     return conn
 
 
