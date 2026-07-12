@@ -208,30 +208,63 @@ def google_callback():
         flow.fetch_token(code=code)
         credentials = flow.credentials
 
-        if credentials.refresh_token:
-            # リフレッシュトークンを暗号化セッションに保存 (settings.jsonには保存しない)
-            session["google_refresh_token"] = credentials.refresh_token
+        refresh_token = credentials.refresh_token
+        if not refresh_token:
+            refresh_token = session.get("google_refresh_token")
             
-            # Google ユーザー情報からユニークIDを特定
-            user_info = gdrive_client.get_user_info(refresh_token=credentials.refresh_token)
-            if not user_info:
-                return "Google ユーザー情報の取得に失敗しました", 500
-                
-            user_id = user_info.get("permissionId") or user_info.get("emailAddress")
-            if not user_id:
-                return "Google ユーザーの一意IDが特定できませんでした", 500
-                
-            session["google_user_id"] = user_id
+        if not refresh_token:
+            # トークンが無い場合は警告画面を出して失敗させる！
+            return """
+            <html>
+            <body style="font-family: sans-serif; padding: 2rem; max-width: 800px; margin: 0 auto; line-height: 1.6;">
+                <h2 style="color: #e53e3e; margin-bottom: 1rem;">⚠️ Google ドライブ連携に必要な認証が取得できませんでした</h2>
+                <p>Google から接続の更新に必要な情報（リフレッシュトークン）が返されませんでした。</p>
+                <p>これは、Googleアカウントにこのアプリのアクセス権がすでに残っている場合に発生します。以下の手順で解決してください：</p>
+                <ol style="margin-left: 1.5rem; margin-bottom: 1.5rem;">
+                    <li><a href="https://myaccount.google.com/connections" target="_blank" style="color: #3182ce; font-weight: bold;">Googleサードパーティ製アプリ管理</a>へアクセスします。</li>
+                    <li>一覧から<strong>「新めも」または「新人めも」（このアプリ）</strong>を選択し、<strong>「接続の削除」</strong>をクリックして連携を一度解除します。</li>
+                    <li>このアプリの画面に戻り、もう一度「Google 連携」を開始してください。</li>
+                </ol>
+                <a href="/logout/google" style="display: inline-block; background: #3182ce; color: white; padding: 0.5rem 1.25rem; text-decoration: none; border-radius: 4px; font-weight: bold;">設定をリセットしてやり直す</a>
+            </body>
+            </html>
+            """, 400
 
-            # ユーザーごとの SQLite キャッシュ DB を初期化・再構築
-            database.init_db(user_id=user_id)
+        session["google_refresh_token"] = refresh_token
+        
+        # Google ユーザー情報からユニークIDを特定
+        user_info = gdrive_client.get_user_info(refresh_token=refresh_token)
+        if not user_info:
+            return "Google ユーザー情報の取得に失敗しました", 500
             
-            # キャッシュの同期実行
-            knowledge_repository.rebuild_cache_from_gdrive(user_id=user_id)
-            inbox_repository.rebuild_inbox_cache(user_id=user_id)
+        user_id = user_info.get("permissionId") or user_info.get("emailAddress")
+        if not user_id:
+            return "Google ユーザーの一意IDが特定できませんでした", 500
             
-            # セッションに同期完了フラグをセット
-            session["vault_synchronized"] = "true"
+        session["google_user_id"] = user_id
+
+        # ユーザーごとの SQLite キャッシュ DB を初期化・再構築
+        database.init_db(user_id=user_id)
+        
+        # DBの user_config に refresh_token を永続保存（セッション切れ・スレッド用）
+        db = database.connect(user_id=user_id)
+        try:
+            with db:
+                db.execute(
+                    "INSERT OR REPLACE INTO user_config (key, value) VALUES ('google_refresh_token', ?)",
+                    (refresh_token,)
+                )
+        except Exception as e:
+            settings.log_debug(f"Failed to save refresh_token to user_config: {e}")
+        finally:
+            db.close()
+        
+        # キャッシュの同期実行
+        knowledge_repository.rebuild_cache_from_gdrive(user_id=user_id)
+        inbox_repository.rebuild_inbox_cache(user_id=user_id)
+        
+        # セッションに同期完了フラグをセット
+        session["vault_synchronized"] = "true"
 
         return redirect(url_for("index"))
     except Exception as e:

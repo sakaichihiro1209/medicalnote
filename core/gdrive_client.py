@@ -26,12 +26,18 @@ def clear_thread_refresh_token():
     if hasattr(_thread_local, "refresh_token"):
         del _thread_local.refresh_token
 
-def get_credentials(refresh_token: str | None = None) -> Credentials | None:
+def get_credentials(refresh_token: str | None = None, user_id: str | None = None) -> Credentials | None:
     """OAuth2 認証用の Credentials を取得する。"""
     client_id = settings.get("GOOGLE_CLIENT_ID")
     client_secret = settings.get("GOOGLE_CLIENT_SECRET")
     
-    # 引数で渡されたトークンを最優先、次点にスレッドローカル、セッション、settings.json
+    if not user_id and has_request_context():
+        try:
+            user_id = session.get("google_user_id")
+        except Exception:
+            pass
+
+    # 引数で渡されたトークンを最優先、次点にスレッドローカル、セッション
     if not refresh_token:
         if hasattr(_thread_local, "refresh_token") and _thread_local.refresh_token:
             refresh_token = _thread_local.refresh_token
@@ -40,6 +46,22 @@ def get_credentials(refresh_token: str | None = None) -> Credentials | None:
                 refresh_token = session.get("google_refresh_token")
             except Exception:
                 pass
+
+    # SQLite DB の user_config からの自動復元 (セッション切れやスレッド競合の救済)
+    if not refresh_token and user_id:
+        from . import database
+        db = None
+        try:
+            db = database.connect(user_id=user_id)
+            cur = db.execute("SELECT value FROM user_config WHERE key = 'google_refresh_token'")
+            row = cur.fetchone()
+            if row:
+                refresh_token = row["value"]
+        except Exception:
+            pass
+        finally:
+            if db:
+                db.close()
 
     if not refresh_token:
         refresh_token = settings.get("GOOGLE_REFRESH_TOKEN")
@@ -58,9 +80,9 @@ def get_credentials(refresh_token: str | None = None) -> Credentials | None:
     )
 
 
-def get_gdrive_service(refresh_token: str | None = None):
+def get_gdrive_service(refresh_token: str | None = None, user_id: str | None = None):
     """Drive API サービスインスタンスを構築する。"""
-    creds = get_credentials(refresh_token=refresh_token)
+    creds = get_credentials(refresh_token=refresh_token, user_id=user_id)
     if not creds:
         settings.log_debug("get_gdrive_service failed: credentials could not be resolved")
         return None

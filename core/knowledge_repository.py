@@ -43,7 +43,7 @@ def _process_async_save(payload):
     
     settings.log_debug(f"[_process_async_save] Started. drive_file_id={drive_file_id}, user_id={user_id}, refresh_token={bool(refresh_token)}")
 
-    service = gdrive_client.get_gdrive_service(refresh_token=refresh_token)
+    service = gdrive_client.get_gdrive_service(refresh_token=refresh_token, user_id=user_id)
     if not service:
         settings.log_debug(f"[_process_async_save] Error: Failed to get drive service for async save of {drive_file_id}")
         return

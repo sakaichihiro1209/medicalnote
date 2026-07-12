@@ -40,6 +40,11 @@ CREATE TABLE IF NOT EXISTS inbox_cache (
     content TEXT,
     organized INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS user_config (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
 """
 
 
@@ -96,10 +101,13 @@ def init_db(user_id: str | None = None) -> None:
             cols = [row[1] for row in cur.fetchall()]
             cur = conn.execute("PRAGMA table_info(section_master)")
             sec_cols = [row[1] for row in cur.fetchall()]
+            # 新しいテーブル user_config が存在するかチェック
+            cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='user_config'")
+            has_user_config = cur.fetchone() is not None
             conn.close()
 
             # 古い構造なら削除
-            if (cols and "content" not in cols) or (cols and "dirty" not in cols) or (sec_cols and "color" not in sec_cols):
+            if (cols and "content" not in cols) or (cols and "dirty" not in cols) or (sec_cols and "color" not in sec_cols) or not has_user_config:
                 print(f"Old schema detected for user {user_id}. Rebuilding SQLite cache DB...")
                 db_path.unlink()
         except Exception as e:
