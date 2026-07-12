@@ -122,9 +122,10 @@
                 <div style="font-size: 0.75rem; color: var(--color-text-gray);">完了するまでしばらくお待ちください</div>
             </div>
 
-            <h3 class="modal-title">新規メモ</h3>
+            <h3 class="modal-title" id="capture-modal-title">新規メモ</h3>
             
             <form id="new-capture-form" onsubmit="event.preventDefault(); submitCaptureForm();">
+                <input type="hidden" id="capture-file-id" name="drive_file_id" value="">
                 
                 <div style="margin-bottom: 0.75rem;">
                     <label for="capture-title-hint" style="font-size: 0.8rem; font-weight: 600; color: var(--color-text-gray); display: block; margin-bottom: 0.25rem;">
@@ -213,24 +214,7 @@
         </div>
     </div>
 
-    <!-- モーダル: 修正（追記） -->
-    <div class="modal-overlay" id="amend-capture-modal" style="display: none; z-index: 300;">
-        <div class="modal-content" style="max-width: 450px;">
-            <h3 class="modal-title">メモ追記</h3>
-            <form id="amend-capture-form" hx-post="" hx-target="#inbox-list-container" hx-on::after-request="closeAmendCaptureModal()">
-                <div style="margin-bottom: 1.25rem;">
-                    <label for="amend-text" style="font-size: 0.8rem; font-weight: 600; color: var(--color-text-gray); display: block; margin-bottom: 0.25rem;">
-                        追記内容
-                    </label>
-                    <textarea name="append_text" class="edit-textarea" id="amend-text" required placeholder="追記内容を入力してください..."></textarea>
-                </div>
-                <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
-                    <button type="button" class="btn btn-secondary" onclick="closeAmendCaptureModal()">キャンセル</button>
-                    <button type="submit" class="btn btn-primary">追記</button>
-                </div>
-            </form>
-        </div>
-    </div>
+
 
     <script>
         function toggleInbox() {
@@ -281,17 +265,47 @@
         // 添付写真の一時蓄積配列
         let selectedFiles = [];
 
-        // キャプチャモーダルの制御
+        // キャプチャモーダルの制御 (作成・編集兼用)
         function openNewCaptureModal() {
             selectedFiles = [];
             renderPreviews();
+            
+            // 隠しIDとタイトルをリセット
+            document.getElementById('capture-file-id').value = '';
+            document.getElementById('capture-modal-title').textContent = '新規メモ';
+            
             document.getElementById('new-capture-modal').style.display = 'flex';
             document.getElementById('capture-title-hint').focus();
+        }
+
+        function openEditCaptureModal(fileId) {
+            selectedFiles = [];
+            renderPreviews();
+
+            // IDと編集タイトルを設定
+            document.getElementById('capture-file-id').value = fileId;
+            document.getElementById('capture-modal-title').textContent = 'メモの編集';
+
+            // 詳細データを非同期でロード
+            fetch(`/inbox/${fileId}/details`)
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('capture-title-hint').value = data.title || '';
+                    document.getElementById('capture-text').value = data.text || '';
+                })
+                .catch(err => {
+                    console.error('Failed to load capture details:', err);
+                });
+
+            document.getElementById('new-capture-modal').style.display = 'flex';
+            document.getElementById('capture-text').focus();
         }
 
         function closeNewCaptureModal() {
             document.getElementById('new-capture-modal').style.display = 'none';
             document.getElementById('new-capture-form').reset();
+            document.getElementById('capture-file-id').value = '';
+            document.getElementById('capture-modal-title').textContent = '新規メモ';
             selectedFiles = [];
             renderPreviews();
             refreshInboxBadge();
@@ -341,13 +355,16 @@
             });
         }
 
-        // FormDataを使った非同期アップロード (バックグラウンド化)
+        // FormDataを使った非同期アップロード (作成と編集の両対応)
         function submitCaptureForm() {
             const textVal = document.getElementById('capture-text').value.trim();
             if (!textVal && selectedFiles.length === 0) {
                 alert('本文または画像を入力してください。');
                 return;
             }
+
+            const fileId = document.getElementById('capture-file-id').value;
+            const isEdit = fileId !== '';
 
             const formData = new FormData();
             formData.append('text', textVal);
@@ -363,15 +380,18 @@
             });
 
             // クライアント側で即座に保存中トースト通知を表示
-            showToast('Google ドライブへ保存中...');
+            showToast(isEdit ? '修正内容を保存中...' : 'Google ドライブへ保存中...');
+
+            // 送信先URLの決定
+            const targetUrl = isEdit ? `/inbox/${fileId}/edit` : '/inbox/new';
 
             // バックグラウンド送信を開始し、完了を待たずに即座にモーダルを閉じる
-            fetch('/inbox/new', {
+            fetch(targetUrl, {
                 method: 'POST',
                 body: formData
             })
             .catch(err => {
-                console.error('Background upload trigger failed:', err);
+                console.error('Background save trigger failed:', err);
             });
 
             // アップロード完了を検知するポーリング処理を開始
@@ -507,19 +527,7 @@
             }
         }
 
-        function openAmendCaptureModal(fileId) {
-            const form = document.getElementById('amend-capture-form');
-            form.setAttribute('hx-post', '/inbox/' + fileId + '/amend');
-            htmx.process(form);
-            document.getElementById('amend-capture-modal').style.display = 'flex';
-            document.getElementById('amend-text').focus();
-        }
 
-        function closeAmendCaptureModal() {
-            document.getElementById('amend-capture-modal').style.display = 'none';
-            document.getElementById('amend-capture-form').reset();
-            refreshInboxBadge();
-        }
 
         function refreshInboxBadge() {
             fetch('/inbox/unorganized-count')

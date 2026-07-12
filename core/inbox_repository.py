@@ -255,17 +255,27 @@ def create_capture(
         db.close()
 
 
-def append_capture(drive_file_id: str, append_text: str, user_id: str | None = None) -> bool:
-    """既存のキャプチャの末尾に修正内容を追記し、整理状態を「未整理」に戻す。"""
+def edit_capture(
+    drive_file_id: str, new_title: str, new_text: str, new_images: List[Tuple[str, bytes]] | None = None, user_id: str | None = None
+) -> bool:
+    """既存のキャプチャを丸ごと上書き保存し、整理状態を「未整理」に戻す。"""
     from flask import has_request_context, session
+    import re
     refresh_token = None
     if not user_id and has_request_context():
         user_id = session.get("google_user_id")
         refresh_token = session.get("google_refresh_token")
 
-    # 1. まずローカルの SQLite キャッシュから既存の content を高速取得
+    if not refresh_token:
+        try:
+            refresh_token = gdrive_client._thread_local.refresh_token
+        except AttributeError:
+            pass
+
+    # 1. まずローカルの SQLite キャッシュから既存の content とファイル名を取得
     db = database.connect(user_id=user_id)
     existing_content = ""
+    filename = "edited_capture.md"
     try:
         cur = db.execute("SELECT content, file_name FROM inbox_cache WHERE drive_file_id = ?", (drive_file_id,))
         row = cur.fetchone()
@@ -277,26 +287,106 @@ def append_capture(drive_file_id: str, append_text: str, user_id: str | None = N
             gdrive_client.set_thread_refresh_token(refresh_token)
             existing_content = gdrive_client.download_file_content(drive_file_id) or ""
             gdrive_client.clear_thread_refresh_token()
-            filename = "amended_capture.md"
     finally:
         db.close()
 
-    if not existing_content:
-        return False
+    # 作成日時のパース (existing_contentから抽出)
+    created_at_line = ""
+    created_match = re.search(r"^作成日時:\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})", existing_content, re.MULTILINE)
+    if created_match:
+        created_at_line = f"作成日時: {created_match.group(1)}"
+    else:
+        created_at_line = f"作成日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+    # 既存の画像リンク ![](attachment://file_id) を抽出して退避
+    existing_image_links = re.findall(r"\!\[\]\(attachment://[a-zA-Z0-9_-]+\)", existing_content)
 
     now = datetime.now()
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    stamp = now.strftime("%Y%m%d_%H%M%S")
 
-    # 追記する文字列 (Python互換)
-    payload = f"\n\n修正日時: {now_str}\n\n{append_text.strip()}\n"
-    new_content = existing_content.rstrip() + payload
+    # 新しい見出し
+    heading = _safe_fragment(new_title or "capture")
+    
+    # ファイル名も新しいタイトルに基づいて更新 (タイムスタンプ部分はそのまま維持)
+    if "_" in filename:
+        parts = filename.split("_", 1)
+        filename = f"{parts[0]}_{heading}.md"
+    else:
+        filename = f"{stamp}_{heading}.md"
+
+    # 新しい画像のアップロード
+    new_image_refs = []
+    if new_images:
+        gdrive_client.set_thread_refresh_token(refresh_token)
+        structure = gdrive_client.ensure_vault_structure(user_id=user_id)
+        attachments_folder_id = structure["attachments"] if structure else None
+        if attachments_folder_id:
+            for i, (original_name, byte_data) in enumerate(new_images):
+                ext = original_name.split(".")[-1].lower() if "." in original_name else "jpg"
+                dest_name = f"{stamp}_{i}_{original_name}"
+                mime_type = f"image/{ext}" if ext in ["png", "jpg", "jpeg", "gif", "webp"] else "application/octet-stream"
+                file_id = gdrive_client.upload_file_bytes(
+                    attachments_folder_id, dest_name, byte_data, mime_type
+                )
+                if file_id:
+                    new_image_refs.append(f"![](attachment://{file_id})")
+        gdrive_client.clear_thread_refresh_token()
+
+    # Markdown 本文を再構成 (上書き)
+    content_lines = [
+        f"# {heading}",
+        "",
+        created_at_line,
+        f"修正日時: {now_str}",
+        "",
+    ]
+    if new_text.strip():
+        content_lines.append(new_text.strip())
+        content_lines.append("")
+
+    # 既存の画像と、新しい画像をマージ
+    all_images = existing_image_links + new_image_refs
+    for img in all_images:
+        content_lines.append(img)
+    content_lines.append("")
+
+    new_content = "\n".join(content_lines)
 
     # 2. ローカルキャッシュを即座に更新
     db = database.connect(user_id=user_id)
     try:
         with db:
             db.execute(
-                "UPDATE inbox_cache SET content = ?, organized = 0 WHERE drive_file_id = ?",
+                "UPDATE inbox_cache SET content = ?, title = ?, file_name = ?, organized = 0 WHERE drive_file_id = ?",
+                (new_content, heading, filename, drive_file_id),
+            )
+    except sqlite3.Error as e:
+        print(f"Failed to update inbox cache on edit: {e}")
+    finally:
+        db.close()
+
+    # 3. Google ドライブへの上書きはバックグラウンドスレッドで非同期に処理
+    def upload_worker():
+        try:
+            gdrive_client.set_thread_refresh_token(refresh_token)
+            service = gdrive_client.get_gdrive_service(refresh_token=refresh_token)
+            if not service:
+                return
+            structure = gdrive_client.ensure_vault_structure(user_id=user_id)
+            if not structure:
+                return
+            inbox_folder_id = structure["inbox"]
+            
+            gdrive_client.upload_file_content(
+                inbox_folder_id, filename, new_content, file_id=drive_file_id
+            )
+            gdrive_client.clear_thread_refresh_token()
+        except Exception as e:
+            print(f"Background inbox upload failed: {e}")
+
+    threading.Thread(target=upload_worker, daemon=True).start()
+    return True, organized = 0 WHERE drive_file_id = ?",
                 (new_content, drive_file_id),
             )
     except sqlite3.Error as e:

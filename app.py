@@ -608,20 +608,88 @@ def new_capture():
     return list_html
 
 
-@app.route("/inbox/<drive_file_id>/amend", methods=["POST"])
-def amend_capture(drive_file_id: str):
-    """既存の未整理メモに追記。"""
+@app.route("/inbox/<drive_file_id>/edit", methods=["POST"])
+def edit_capture(drive_file_id: str):
+    """既存のメモを上書き編集保存する。"""
     conflict = check_drive_lock_and_respond()
     if conflict:
         return conflict
 
-    append_text = request.form.get("append_text", "")
-    user_id = session.get("google_user_id")
-    inbox_repository.append_capture(drive_file_id, append_text, user_id=user_id)
+    title = request.form.get("title_hint", "").strip()
+    text = request.form.get("text", "")
 
-    # 追記後のリスト表示をリフレッシュ
+    # 新規追加の画像
+    images = []
+    for key in ["images_lib", "images_cam"]:
+        if key in request.files:
+            files = request.files.getlist(key)
+            for f in files:
+                if f.filename:
+                    images.append((f.filename, f.read()))
+
+    user_id = session.get("google_user_id")
+    refresh_token = session.get("google_refresh_token")
+
+    # 非同期でのアップロード実行
+    def bg_edit():
+        set_drive_task_status(user_id, True, "メモの上書き修正")
+        try:
+            gdrive_client.set_thread_refresh_token(refresh_token)
+            inbox_repository.edit_capture(
+                drive_file_id, title, text, new_images=images, user_id=user_id
+            )
+            inbox_repository.rebuild_inbox_cache(user_id=user_id)
+            gdrive_client.clear_thread_refresh_token()
+        except Exception as e:
+            print(f"Background edit task failed: {e}")
+        finally:
+            set_drive_task_status(user_id, False, None)
+
+    threading.Thread(target=bg_edit).start()
+
+    # 即座にレスポンスを返す
     captures = inbox_repository.list_captures(user_id=user_id)
     return make_inbox_list_response(captures, user_id=user_id)
+
+
+@app.route("/inbox/<drive_file_id>/details", methods=["GET"])
+def get_inbox_details(drive_file_id: str):
+    """メモ編集モーダル用に、既存メモのタイトル・生テキストをロードするための JSON レスポンス。"""
+    user_id = session.get("google_user_id")
+    db = database.connect(user_id=user_id)
+    title = ""
+    raw_text = ""
+    try:
+        cur = db.execute("SELECT title, content FROM inbox_cache WHERE drive_file_id = ?", (drive_file_id,))
+        row = cur.fetchone()
+        if row:
+            title = row["title"]
+            content = row["content"]
+            
+            # Markdown 本文から、見出し行とメタデータ（作成日時・修正日時）行を除去して「生テキスト」を復元する
+            lines = content.splitlines()
+            body_lines = []
+            header_passed = 0
+            
+            for line in lines:
+                if line.startswith("# ") and header_passed == 0:
+                    header_passed = 1
+                    continue
+                if line.startswith("作成日時:") or line.startswith("修正日時:"):
+                    continue
+                if line.strip() == "" and header_passed < 3:
+                    continue
+                if line.startswith("![](attachment://"):
+                    continue
+                    
+                body_lines.append(line)
+                header_passed = 3
+                
+            raw_text = "\n".join(body_lines).strip()
+    finally:
+        db.close()
+
+    return jsonify({"title": title, "text": raw_text})
 
 
 @app.route("/inbox/<drive_file_id>/toggle-organized", methods=["POST"])
