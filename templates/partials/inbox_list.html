@@ -100,7 +100,7 @@
                     img.style.display = 'block';
                     img.addEventListener('click', function(e) {
                         e.stopPropagation(); // アコーディオン編集・キャンセル等の伝播防止
-                        window.openImageZoomModal(this.src);
+                        window.open(this.src, '_blank');
                     });
                 });
 

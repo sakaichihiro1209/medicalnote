@@ -109,6 +109,9 @@ def rebuild_inbox_cache(user_id: str | None = None) -> int:
                     gdrive_client.set_thread_refresh_token(refresh_token)
                     text = gdrive_client.download_file_content(file_id) or ""
                     gdrive_client.clear_thread_refresh_token()
+                    # Markdown 内の 整理済み タグを検索して復元
+                    if "<!-- organized: 1 -->" in text:
+                        is_organized = 1
 
                 db.execute(
                     "INSERT OR REPLACE INTO inbox_cache (drive_file_id, file_name, title, date_time, content, organized) "
@@ -399,19 +402,84 @@ def edit_capture(
 
 
 def set_organized(drive_file_id: str, organized: bool, user_id: str | None = None) -> None:
-    """指定されたキャプチャの整理状態を SQLite DB 上で更新する。"""
+    """指定されたキャプチャの整理状態を SQLite DB 上で更新し、Markdown ファイルのコメントタグも更新して非同期でドライブへ上書きアップロードする。"""
+    from flask import has_request_context, session
+    refresh_token = None
+    if not user_id and has_request_context():
+        user_id = session.get("google_user_id")
+        refresh_token = session.get("google_refresh_token")
+
     db = database.connect(user_id=user_id)
     val = 1 if organized else 0
+    
+    content = ""
+    filename = ""
+    try:
+        cur = db.execute("SELECT content, file_name FROM inbox_cache WHERE drive_file_id = ?", (drive_file_id,))
+        row = cur.fetchone()
+        if row:
+            content = row["content"]
+            filename = row["file_name"]
+    except sqlite3.Error as e:
+        print(f"Failed to fetch cache in set_organized: {e}")
+    finally:
+        db.close()
+
+    if not content:
+        db = database.connect(user_id=user_id)
+        try:
+            with db:
+                db.execute("UPDATE inbox_cache SET organized = ? WHERE drive_file_id = ?", (val, drive_file_id))
+        finally:
+            db.close()
+        return
+
+    # Markdown テキストを書き換える
+    import re
+    clean_content = re.sub(r"<!--\s*organized:\s*\d\s*-->\n?", "", content)
+    
+    if "作成日時:" in clean_content:
+        parts = clean_content.split("作成日時:", 1)
+        subparts = parts[1].split("\n", 1)
+        date_line = "作成日時:" + subparts[0]
+        rest = subparts[1] if len(subparts) > 1 else ""
+        new_content = f"{parts[0]}{date_line}\n<!-- organized: {val} -->\n{rest}"
+    else:
+        new_content = f"<!-- organized: {val} -->\n{clean_content}"
+
+    # ローカル DB を即時更新
+    db = database.connect(user_id=user_id)
     try:
         with db:
             db.execute(
-                "UPDATE inbox_cache SET organized = ? WHERE drive_file_id = ?",
-                (val, drive_file_id),
+                "UPDATE inbox_cache SET organized = ?, content = ? WHERE drive_file_id = ?",
+                (val, new_content, drive_file_id),
             )
     except sqlite3.Error as e:
         print(f"Failed to update organized cache for {drive_file_id}: {e}")
     finally:
         db.close()
+
+    # ドライブへの非同期アップロード
+    def upload_organized_worker():
+        from app import set_drive_task_status
+        set_drive_task_status(user_id, True, "整理状態の同期")
+        try:
+            gdrive_client.set_thread_refresh_token(refresh_token)
+            structure = gdrive_client.ensure_vault_structure(user_id=user_id)
+            if structure:
+                inbox_folder_id = structure["inbox"]
+                gdrive_client.upload_file_content(
+                    inbox_folder_id, filename, new_content, file_id=drive_file_id
+                )
+            gdrive_client.clear_thread_refresh_token()
+        except Exception as e:
+            print(f"Background organized tag upload failed: {e}")
+        finally:
+            set_drive_task_status(user_id, False, None)
+
+    import threading
+    threading.Thread(target=upload_organized_worker, daemon=True).start()
 
 
 def get_unorganized_count(user_id: str | None = None) -> int:

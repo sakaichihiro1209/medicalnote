@@ -312,7 +312,7 @@ header {
 /* Sectionカード自動着色 */
 .section-card {
   border-radius: var(--radius-lg);
-  padding: 1.5rem;
+  padding: 1.2rem;
   box-shadow: var(--shadow-sm);
   border: 1px solid rgba(0, 0, 0, 0.05);
   cursor: pointer;
@@ -338,15 +338,15 @@ header {
 
 .section-card-title {
   font-family: var(--font-title);
-  font-size: 1.2rem;
+  font-size: 1.1rem;
   font-weight: 600;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.6rem;
   color: var(--sec-text-color, #2d3748);
 }
 
 .section-card-content {
-  font-size: 0.95rem;
-  line-height: 1.6;
+  font-size: 0.9rem;
+  line-height: 1.5;
   white-space: pre-wrap;
 }
 
