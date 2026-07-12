@@ -287,7 +287,7 @@
             document.getElementById('capture-modal-title').textContent = 'メモの編集';
 
             // 詳細データを非同期でロード
-            fetch(`/inbox/${fileId}/details`)
+            fetch('/inbox/' + fileId + '/details')
                 .then(res => res.json())
                 .then(data => {
                     document.getElementById('capture-title-hint').value = data.title || '';
@@ -383,7 +383,7 @@
             showToast(isEdit ? '修正内容を保存中...' : 'Google ドライブへ保存中...');
 
             // 送信先URLの決定
-            const targetUrl = isEdit ? `/inbox/${fileId}/edit` : '/inbox/new';
+            const targetUrl = isEdit ? '/inbox/' + fileId + '/edit' : '/inbox/new';
 
             // バックグラウンド送信を開始し、完了を待たずに即座にモーダルを閉じる
             fetch(targetUrl, {
@@ -589,7 +589,7 @@
 
             // 最初の行にフォーカス
             setTimeout(() => {
-                const el = document.querySelector(`.editor-row[data-index="${activeRowIndex}"] .row-textarea`);
+                const el = document.querySelector('.editor-row[data-index="' + activeRowIndex + '"] .row-textarea');
                 if (el) {
                     el.focus();
                     el.setSelectionRange(el.value.length, el.value.length);
@@ -717,7 +717,7 @@
                         activeRowIndex = index;
                         renderHonkiRows();
                         setTimeout(() => {
-                            const textarea = document.querySelector(`.editor-row[data-index="${index}"] .row-textarea`);
+                            const textarea = document.querySelector('.editor-row[data-index="' + index + '"] .row-textarea');
                             if (textarea) {
                                 textarea.focus();
                                 // クリック位置または末尾にカーソルを設定
@@ -767,7 +767,7 @@
                 
                 // 次の行にフォーカスを設定
                 setTimeout(() => {
-                    const nextEl = document.querySelector(`.editor-row[data-index="${index + 1}"] .row-textarea`);
+                    const nextEl = document.querySelector('.editor-row[data-index="' + (index + 1) + '"] .row-textarea');
                     if (nextEl) {
                         nextEl.focus();
                         nextEl.setSelectionRange(prefix.length, prefix.length);
@@ -786,7 +786,7 @@
                         renderHonkiRows();
                         
                         setTimeout(() => {
-                            const prevEl = document.querySelector(`.editor-row[data-index="${index - 1}"] .row-textarea`);
+                            const prevEl = document.querySelector('.editor-row[data-index="' + (index - 1) + '"] .row-textarea');
                             if (prevEl) {
                                 prevEl.focus();
                                 prevEl.setSelectionRange(targetLen, targetLen);
@@ -801,7 +801,7 @@
                         activeRowIndex = index - 1;
                         renderHonkiRows();
                         setTimeout(() => {
-                            const prevEl = document.querySelector(`.editor-row[data-index="${index - 1}"] .row-textarea`);
+                            const prevEl = document.querySelector('.editor-row[data-index="' + (index - 1) + '"] .row-textarea');
                             if (prevEl) {
                                 prevEl.focus();
                                 prevEl.setSelectionRange(honkiLines[index - 1].length, honkiLines[index - 1].length);
@@ -816,7 +816,7 @@
                         activeRowIndex = index + 1;
                         renderHonkiRows();
                         setTimeout(() => {
-                            const nextEl = document.querySelector(`.editor-row[data-index="${index + 1}"] .row-textarea`);
+                            const nextEl = document.querySelector('.editor-row[data-index="' + (index + 1) + '"] .row-textarea');
                             if (nextEl) {
                                 nextEl.focus();
                                 nextEl.setSelectionRange(0, 0);
@@ -830,7 +830,7 @@
         // ツールバーボタンによるマークダウン装飾挿入
         function insertMarkdownAtActive(type) {
             if (activeRowIndex === null) return;
-            const textarea = document.querySelector(`.editor-row[data-index="${activeRowIndex}"] .row-textarea`);
+            const textarea = document.querySelector('.editor-row[data-index="' + activeRowIndex + '"] .row-textarea');
             if (!textarea) return;
 
             const start = textarea.selectionStart;
@@ -875,7 +875,7 @@
                     selectionOffset = 6;
                     break;
                 case 'code':
-                    val = val.substring(0, start) + "`" + val.substring(start, end) + "`" + val.substring(end);
+                    val = val.substring(0, start) + '`' + val.substring(start, end) + '`' + val.substring(end);
                     selectionOffset = 1;
                     break;
             }
@@ -898,7 +898,7 @@
                 activeRowIndex = honkiLines.length - 1;
                 renderHonkiRows();
                 setTimeout(() => {
-                    const lastEl = document.querySelector(`.editor-row[data-index="${honkiLines.length - 1}"] .row-textarea`);
+                    const lastEl = document.querySelector('.editor-row[data-index="' + (honkiLines.length - 1) + '"] .row-textarea');
                     if (lastEl) {
                         lastEl.focus();
                         lastEl.setSelectionRange(lastEl.value.length, lastEl.value.length);
