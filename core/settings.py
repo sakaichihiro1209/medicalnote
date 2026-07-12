@@ -93,3 +93,15 @@ def clear_auth_settings() -> None:
             json.dump(settings, f, ensure_ascii=False, indent=4)
     except Exception as e:
         print(f"Failed to clear auth settings: {e}")
+
+
+DEBUG_LOGS = []
+
+def log_debug(msg: str) -> None:
+    import datetime
+    ts = datetime.datetime.now().isoformat()
+    line = f"[{ts}] {msg}"
+    DEBUG_LOGS.append(line)
+    print(line)
+    if len(DEBUG_LOGS) > 1000:
+        DEBUG_LOGS.pop(0)

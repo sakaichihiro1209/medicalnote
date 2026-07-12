@@ -854,6 +854,41 @@ def rebuild_cache():
     return response
 
 
+@app.route("/debug-logs")
+def show_debug_logs():
+    """バックグラウンド同期のデバッグログを表示する。"""
+    user_id = session.get("google_user_id")
+    db = database.connect(user_id=user_id)
+    dirty_count = 0
+    try:
+        cur = db.execute("SELECT COUNT(*) AS c FROM knowledge WHERE dirty = 1")
+        dirty_count = cur.fetchone()["c"]
+    except Exception as e:
+        dirty_count = f"Error: {e}"
+    finally:
+        db.close()
+
+    logs_html = "<br>".join(settings.DEBUG_LOGS[::-1])  # 最新を上に
+    return f"""
+    <html>
+    <head><title>新人めも - デバッグログ</title></head>
+    <body style="font-family: monospace; padding: 2rem; background: #1a202c; color: #cbd5e0; line-height: 1.5;">
+        <h2 style="color: #63b3ed; border-bottom: 2px solid #2d3748; padding-bottom: 0.5rem; margin-bottom: 1rem;">⚙️ 同期デバッグログ診断</h2>
+        <div style="background: #2d3748; padding: 1rem; border-radius: 6px; margin-bottom: 1.5rem; border: 1px solid #4a5568;">
+            <strong>ユーザー ID:</strong> {user_id}<br>
+            <strong>未同期のデータ件数 (dirty=1):</strong> <span style="color: {'#fc8181' if str(dirty_count) != '0' else '#68d391'}; font-weight: bold;">{dirty_count}</span>
+        </div>
+        <div style="background: #2d3748; padding: 1.5rem; border-radius: 6px; border: 1px solid #4a5568; max-height: 500px; overflow-y: auto;">
+            {logs_html if logs_html else "ログはまだ記録されていません。"}
+        </div>
+        <br>
+        <button onclick="window.location.reload()" style="background: #3182ce; color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; font-weight: bold; cursor: pointer;">更新</button>
+        <a href="/" style="color: #a0aec0; margin-left: 1rem; text-decoration: none;">← アプリに戻る</a>
+    </body>
+    </html>
+    """
+
+
 # =====================================================================
 # サーバー起動 (ローカル検証用)
 # =====================================================================

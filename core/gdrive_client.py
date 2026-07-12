@@ -45,6 +45,7 @@ def get_credentials(refresh_token: str | None = None) -> Credentials | None:
         refresh_token = settings.get("GOOGLE_REFRESH_TOKEN")
 
     if not client_id or not client_secret or not refresh_token:
+        settings.log_debug(f"get_credentials failed: client_id={bool(client_id)}, client_secret={bool(client_secret)}, refresh_token={bool(refresh_token)}")
         return None
 
     return Credentials(
@@ -61,9 +62,13 @@ def get_gdrive_service(refresh_token: str | None = None):
     """Drive API サービスインスタンスを構築する。"""
     creds = get_credentials(refresh_token=refresh_token)
     if not creds:
+        settings.log_debug("get_gdrive_service failed: credentials could not be resolved")
         return None
-    # google-auth ライブラリが期限切れトークンを自動で更新する
-    return build("drive", "v3", credentials=creds)
+    try:
+        return build("drive", "v3", credentials=creds)
+    except Exception as e:
+        settings.log_debug(f"Failed to build googleapiclient drive service: {e}")
+        return None
 
 
 def get_user_info(refresh_token: str | None = None) -> dict | None:

@@ -40,15 +40,18 @@ def _process_async_save(payload):
     local_updated_at = payload["local_updated_at"]
     user_id = payload.get("user_id")
     refresh_token = payload.get("refresh_token")
+    
+    settings.log_debug(f"[_process_async_save] Started. drive_file_id={drive_file_id}, user_id={user_id}, refresh_token={bool(refresh_token)}")
+
     service = gdrive_client.get_gdrive_service(refresh_token=refresh_token)
     if not service:
-        print(f"[Sync Worker] Failed to get drive service for async save of {drive_file_id}")
+        settings.log_debug(f"[_process_async_save] Error: Failed to get drive service for async save of {drive_file_id}")
         return
 
     # 特定ユーザーの資格情報を使用してドライブ構造を確認
     structure = gdrive_client.ensure_vault_structure(user_id=user_id, refresh_token=refresh_token)
     if not structure:
-        print(f"[Sync Worker] Failed to resolve Vault structure on async save for user {user_id}")
+        settings.log_debug(f"[_process_async_save] Error: Failed to resolve Vault structure on async save for user {user_id}")
         return
     parent_id = structure.get("knowledge")
     
@@ -60,33 +63,15 @@ def _process_async_save(payload):
     finally:
         db.close()
 
-    # 個別のserviceインスタンスを使用するために、gdrive_clientのアップロード用service指定対応が理想的だが、
-    # 現在の gdrive_client はグローバルな get_gdrive_service を呼ぶため、
-    # 非同期スレッド実行時に credentials.refresh_token を渡して service を都度生成している。
-    # upload_file_content などの関数を credentials を使って実行できるようにするか、
-    # または thread-local にサービスをバインドする。
-    # 一番簡単なのは、gdrive_client.py 側にサービス指定のアップロード引数を持たせるか、
-    # gdrive_client.py がリクエストコンテキスト外では自動的に渡された refresh_token を使うように get_credentials を改修したので、
-    # このスレッドのコンテキストで gdrive_client.get_credentials(refresh_token) が呼ばれるように、
-    # thread-local 領域や gdrive_client 側で thread_local の資格情報を保持させる。
-    # すでに get_credentials は has_request_context() が無い場合は settings.get("GOOGLE_REFRESH_TOKEN") を見ている。
-    # そこで、スレッド処理中だけ settings.json に頼らずに渡された refresh_token を get_credentials が返せるように、
-    # gdrive_client の get_credentials に「引数の refresh_token」を渡せるように先ほど追加した！
-    # したがって、gdrive_client の upload_file_content などの API 操作関数内でも、
-    # `get_gdrive_service(refresh_token)` のようにトークンを受け取れるように改修されているべき。
-    # gdrive_client の upload_file_content は service を get_gdrive_service() で自動生成している。
-    # この問題を一番シンプルに解決するため、スレッド起動時に「そのスレッド固有のグローバル変数（Thread Local）」に
-    # ユーザーの refresh_token を退避させておき、get_credentials が自動でそれを参照するようにすれば、
-    # 既存のすべての gdrive_client の関数の引数を増やすことなく、完璧にマルチユーザー非同期処理が動作する！
-    # これは Python でマルチスレッドプログラミングする際の伝統的な極めて美しいデザインパターン (Thread-local storage) である。
-    # これなら、何十個もある gdrive_client の関数の引数を1つも書き換える必要がない！
-    # この設計については、後ほど gdrive_client.py に thread-local を追加して実装する。
-    
+    settings.log_debug(f"[_process_async_save] Uploading to parent_id={parent_id}, filename={filename}...")
     uploaded_id = gdrive_client.upload_file_content(parent_id, filename, content, file_id=drive_file_id, refresh_token=refresh_token)
+    
     if uploaded_id:
+        settings.log_debug(f"[_process_async_save] Upload success. file_id={uploaded_id}. Fetching modifiedTime...")
         try:
             file_meta = service.files().get(fileId=drive_file_id, fields="modifiedTime").execute()
             new_drive_modified = file_meta.get("modifiedTime")
+            settings.log_debug(f"[_process_async_save] Drive modifiedTime={new_drive_modified}")
             if new_drive_modified:
                 db = database.connect(user_id=user_id)
                 try:
@@ -98,7 +83,7 @@ def _process_async_save(payload):
                 finally:
                     db.close()
         except Exception as e:
-            print(f"[Sync Worker] Post-save metadata sync failed: {e}")
+            settings.log_debug(f"[Sync Worker] Post-save metadata sync failed: {e}")
 
 def _process_async_delete(payload):
     drive_file_id = payload["drive_file_id"]
@@ -113,13 +98,14 @@ def _sync_worker():
                 break
             action = task.get("action")
             payload = task.get("payload")
+            settings.log_debug(f"[Sync Worker] Task popped from queue: action={action}")
             if action == "save":
                 _process_async_save(payload)
             elif action == "delete":
                 _process_async_delete(payload)
             _sync_queue.task_done()
         except Exception as e:
-            print(f"[Sync Worker] Sync worker error: {e}")
+            settings.log_debug(f"[Sync Worker] Sync worker loop exception: {e}")
 
 # シリアル同期ワーカーのスレッドを常時起動
 threading.Thread(target=_sync_worker, daemon=True).start()
