@@ -420,7 +420,7 @@ def create_card(title: str, user_id: str | None = None) -> str | None:
 
 
 def save_card(drive_file_id: str, doc: markdown_parser.KnowledgeDocument, user_id: str | None = None) -> bool:
-    """カードの中身 (KnowledgeDocument) を SQLite キャッシュに即座に保存し、Google ドライブへは非同期アップロードキューに入れる。"""
+    """カードの中身 (KnowledgeDocument) を SQLite キャッシュに即座に保存し、Google ドライブへは非同期スレッドでバックグラウンド保存する。"""
     text = markdown_parser.render_markdown(doc)
     
     refresh_token = None
@@ -444,22 +444,22 @@ def save_card(drive_file_id: str, doc: markdown_parser.KnowledgeDocument, user_i
     finally:
         db.close()
 
-    # 2. ドライブ同期ジョブをキューに追加
-    _sync_queue.put({
-        "action": "save",
-        "payload": {
-            "drive_file_id": drive_file_id,
-            "content": text,
-            "local_updated_at": ts,
-            "user_id": user_id,
-            "refresh_token": refresh_token
-        }
-    })
+    # 2. ドライブ同期を使い捨てバックグラウンドスレッドで起動 (GunicornのFork消失対策)
+    payload = {
+        "drive_file_id": drive_file_id,
+        "content": text,
+        "local_updated_at": ts,
+        "user_id": user_id,
+        "refresh_token": refresh_token
+    }
+    
+    import threading
+    threading.Thread(target=_process_async_save, args=(payload,), daemon=True).start()
     return True
 
 
 def delete_card(drive_file_id: str, user_id: str | None = None) -> bool:
-    """SQLite キャッシュから即時削除し、Google ドライブからは非同期で物理削除する。"""
+    """SQLite キャッシュから即時削除し、Google ドライブからは非同期スレッドで物理削除する。"""
     refresh_token = None
     if has_request_context():
         if not user_id:
@@ -471,14 +471,13 @@ def delete_card(drive_file_id: str, user_id: str | None = None) -> bool:
         with db:
             db.execute("DELETE FROM knowledge WHERE drive_file_id = ?", (drive_file_id,))
         
-        # ドライブ削除ジョブをキューに追加
-        _sync_queue.put({
-            "action": "delete",
-            "payload": {
-                "drive_file_id": drive_file_id,
-                "refresh_token": refresh_token
-            }
-        })
+        # ドライブ物理削除を使い捨てバックグラウンドスレッドで起動
+        payload = {
+            "drive_file_id": drive_file_id,
+            "refresh_token": refresh_token
+        }
+        import threading
+        threading.Thread(target=_process_async_delete, args=(payload,), daemon=True).start()
         return True
     except sqlite3.Error as e:
         print(f"Failed to delete card cache {drive_file_id}: {e}")
