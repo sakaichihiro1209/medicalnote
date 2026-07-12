@@ -107,11 +107,15 @@ def rebuild_inbox_cache(user_id: str | None = None) -> int:
                     text = ""
                 else:
                     gdrive_client.set_thread_refresh_token(refresh_token)
-                    text = gdrive_client.download_file_content(file_id) or ""
+                    raw_text = gdrive_client.download_file_content(file_id) or ""
                     gdrive_client.clear_thread_refresh_token()
                     # Markdown 内の 整理済み タグを検索して復元
-                    if "<!-- organized: 1 -->" in text:
+                    if "<!-- organized: 1 -->" in raw_text:
                         is_organized = 1
+                    
+                    # 本文キャッシュから organized コメントを完全に除去して格納 (ユーザー非表示化)
+                    import re
+                    text = re.sub(r"<!--\s*organized:\s*\d\s*-->\n?", "", raw_text)
 
                 db.execute(
                     "INSERT OR REPLACE INTO inbox_cache (drive_file_id, file_name, title, date_time, content, organized) "
@@ -231,16 +235,34 @@ def create_capture(
         content_lines.append(ref)
     content_lines.append("")
 
+    # DBキャッシュ用 (organizedタグを含まないクリーンな内容)
+    markdown_content_cache = "\n".join(content_lines)
+
+    # ドライブアップロード用 (動的に organized タグを付加)
+    upload_content_lines = [
+        f"# {heading}",
+        "",
+        f"作成日時: {now.strftime('%Y-%m-%d %H:%M:%S')}",
+        "<!-- organized: 0 -->",
+        "",
+    ]
+    if text.strip():
+        upload_content_lines.append(text.strip())
+        upload_content_lines.append("")
+    for ref in image_refs:
+        upload_content_lines.append(ref)
+    upload_content_lines.append("")
+    markdown_content_upload = "\n".join(upload_content_lines)
+
     # 3. Google ドライブへアップロード
-    markdown_content = "\n".join(content_lines)
     gdrive_client.set_thread_refresh_token(refresh_token)
-    file_id = gdrive_client.upload_file_content(inbox_folder_id, filename, markdown_content)
+    file_id = gdrive_client.upload_file_content(inbox_folder_id, filename, markdown_content_upload)
     gdrive_client.clear_thread_refresh_token()
 
     if not file_id:
         return None
 
-    # 4. SQLite キャッシュ DB の整理状態を「未整理 (0)」に初期登録し本文もキャッシュ
+    # 4. SQLite キャッシュ DB の整理状態を「未整理 (0)」に初期登録し本文もキャッシュ (クリーンな本文)
     db = database.connect(user_id=user_id)
     try:
         with db:
@@ -248,7 +270,7 @@ def create_capture(
             db.execute(
                 "INSERT OR REPLACE INTO inbox_cache (drive_file_id, file_name, title, date_time, content, organized) "
                 "VALUES (?, ?, ?, ?, ?, 0)",
-                (file_id, filename, heading, dt_str, markdown_content),
+                (file_id, filename, heading, dt_str, markdown_content_cache),
             )
         return file_id
     except sqlite3.Error as e:
@@ -292,6 +314,9 @@ def edit_capture(
             gdrive_client.clear_thread_refresh_token()
     finally:
         db.close()
+
+    # 既存の organized フラグコメントを完全に除去 (ユーザー非表示化)
+    existing_content = re.sub(r"<!--\s*organized:\s*\d\s*-->\n?", "", existing_content)
 
     # 作成日時のパース (existing_contentから抽出)
     created_at_line = ""
@@ -339,7 +364,7 @@ def edit_capture(
                     new_image_refs.append(f"![](attachment://{file_id})")
         gdrive_client.clear_thread_refresh_token()
 
-    # Markdown 本文を再構成 (上書き)
+    # Markdown 本文を再構成 (上書き - DB用クリーンテキスト)
     content_lines = [
         f"# {heading}",
         "",
@@ -360,6 +385,26 @@ def edit_capture(
     content_lines.append("")
 
     new_content = "\n".join(content_lines)
+
+    # ドライブアップロード用 (動的に organized タグを付加 - 編集時は 0 (未整理) とする)
+    upload_content_lines = [
+        f"# {heading}",
+        "",
+        created_at_line,
+        "<!-- organized: 0 -->",
+    ]
+    for past_upd in past_updates:
+        upload_content_lines.append(past_upd)
+    upload_content_lines.append(f"修正日時: {now_str}")
+    upload_content_lines.append("")
+    if new_text.strip():
+        upload_content_lines.append(new_text.strip())
+        upload_content_lines.append("")
+    for img in all_images:
+        upload_content_lines.append(img)
+    upload_content_lines.append("")
+
+    upload_content = "\n".join(upload_content_lines)
 
     # 2. ローカルキャッシュを即座に更新
     db = database.connect(user_id=user_id)
@@ -389,7 +434,7 @@ def edit_capture(
             inbox_folder_id = structure["inbox"]
             
             gdrive_client.upload_file_content(
-                inbox_folder_id, filename, new_content, file_id=drive_file_id
+                inbox_folder_id, filename, upload_content, file_id=drive_file_id
             )
             gdrive_client.clear_thread_refresh_token()
         except Exception as e:
