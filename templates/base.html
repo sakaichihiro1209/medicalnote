@@ -164,9 +164,52 @@
 
                 <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
                     <button type="button" class="btn btn-secondary" onclick="closeNewCaptureModal()">キャンセル</button>
+                    <button type="button" class="btn btn-secondary" onclick="openHonkiEditorFromModal()" style="border-color: var(--color-primary); color: var(--color-primary); font-weight: bold;">本気メモ</button>
                     <button type="submit" class="btn btn-primary">アップロード</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- モーダル: 本気メモ (大画面 Obsidianライク Live Preview エディタ) -->
+    <div class="modal-overlay" id="honki-editor-modal" style="display: none; z-index: 310; width: 100vw; height: 100vh; padding: 0; margin: 0; align-items: center; justify-content: center;">
+        <div class="modal-content" style="width: 95vw; height: 90vh; max-width: 1200px; max-height: 850px; display: flex; flex-direction: column; overflow: hidden; padding: 1.5rem; border-radius: var(--radius-lg); background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.4); box-shadow: var(--shadow-lg);">
+            <!-- ローディングオーバーレイ -->
+            <div id="honki-loading-overlay" style="display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(2px); border-radius: var(--radius-lg); z-index: 10; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem;">
+                <div class="material-symbols-outlined" style="animation: spin 1.5s linear infinite; font-size: 3rem; color: var(--color-primary);">sync</div>
+                <div style="font-weight: 600; color: var(--color-text-dark); font-size: 0.95rem;">Google ドライブへ保存中...</div>
+                <div style="font-size: 0.75rem; color: var(--color-text-gray);">完了するまでしばらくお待ちください</div>
+            </div>
+
+            <!-- ヘッダー部 -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; gap: 1rem; flex-wrap: wrap;">
+                <div style="flex-grow: 1; display: flex; align-items: center; gap: 0.5rem; max-width: 60%;">
+                    <span class="material-symbols-outlined" style="color: var(--color-primary); font-size: 1.6rem;">edit_note</span>
+                    <input type="text" id="honki-title" placeholder="本気メモのタイトルを入力..." style="font-size: 1.25rem; font-weight: 700; border: none; background: transparent; outline: none; width: 100%; color: var(--color-text-dark); border-bottom: 2px solid transparent; transition: border-color 0.15s ease;" onfocus="this.style.borderBottomColor='var(--color-primary)'" onblur="this.style.borderBottomColor='transparent'">
+                </div>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <button class="btn btn-secondary" onclick="closeHonkiEditor()">キャンセル</button>
+                    <button class="btn btn-primary" onclick="submitHonkiCapture()" style="background-color: var(--color-primary); font-weight: bold; display: flex; align-items: center; gap: 0.35rem;">
+                        <span class="material-symbols-outlined" style="font-size: 1.1rem;">cloud_upload</span> 保存してアップロード
+                    </button>
+                </div>
+            </div>
+
+            <!-- ツールバー -->
+            <div class="honki-toolbar">
+                <button type="button" class="honki-toolbar-btn" onclick="insertMarkdownAtActive('h1')"><span class="material-symbols-outlined">title</span> H1</button>
+                <button type="button" class="honki-toolbar-btn" onclick="insertMarkdownAtActive('h2')"><span class="material-symbols-outlined">format_size</span> H2</button>
+                <button type="button" class="honki-toolbar-btn" onclick="insertMarkdownAtActive('bold')"><span class="material-symbols-outlined">format_bold</span> 太字</button>
+                <button type="button" class="honki-toolbar-btn" onclick="insertMarkdownAtActive('italic')"><span class="material-symbols-outlined">format_italic</span> 斜体</button>
+                <button type="button" class="honki-toolbar-btn" onclick="insertMarkdownAtActive('list')"><span class="material-symbols-outlined">format_list_bulleted</span> リスト</button>
+                <button type="button" class="honki-toolbar-btn" onclick="insertMarkdownAtActive('todo')"><span class="material-symbols-outlined">checklist</span> タスク</button>
+                <button type="button" class="honki-toolbar-btn" onclick="insertMarkdownAtActive('code')"><span class="material-symbols-outlined">code</span> コード</button>
+            </div>
+
+            <!-- エディタ本体 -->
+            <div class="honki-editor-body" id="honki-editor-container" onclick="handleContainerClick(event)">
+                <!-- 行ブロックが動的に生成されます -->
+            </div>
         </div>
     </div>
 
@@ -505,6 +548,400 @@
                     }
                 });
         }
+
+        // =====================================================================
+        // 「本気メモ」大画面インライン Live Preview エディタ制御ロジック
+        // =====================================================================
+        let honkiLines = [""];
+        let activeRowIndex = 0;
+
+        function openHonkiEditorFromModal() {
+            // 既存のかんたんメモモーダルからタイトルと本文を引き継ぐ
+            const titleInput = document.getElementById('capture-title-hint');
+            const textInput = document.getElementById('capture-text');
+            
+            document.getElementById('honki-title').value = titleInput ? titleInput.value.trim() : '';
+            const initialText = textInput ? textInput.value : '';
+            
+            if (initialText.trim()) {
+                honkiLines = initialText.split('\n');
+            } else {
+                honkiLines = [""];
+            }
+
+            // かんたんメモモーダルを閉じる
+            closeNewCaptureModal();
+
+            // 本気メモモーダルを表示
+            document.getElementById('honki-editor-modal').style.display = 'flex';
+            
+            // 初回描画
+            activeRowIndex = honkiLines.length - 1;
+            renderHonkiRows();
+
+            // 最初の行にフォーカス
+            setTimeout(() => {
+                const el = document.querySelector(`.editor-row[data-index="${activeRowIndex}"] .row-textarea`);
+                if (el) {
+                    el.focus();
+                    el.setSelectionRange(el.value.length, el.value.length);
+                }
+            }, 100);
+        }
+
+        function closeHonkiEditor() {
+            document.getElementById('honki-editor-modal').style.display = 'none';
+            document.getElementById('honki-title').value = '';
+            honkiLines = [""];
+            activeRowIndex = 0;
+            refreshInboxBadge();
+        }
+
+        // 簡易Markdown行パーサー (HTMLレンダリング用)
+        function parseMarkdownJS(md) {
+            if (!md) return "<span style='color: var(--color-text-gray); font-style: italic; font-size: 0.9rem;'>空の行 (クリックして入力)</span>";
+            let html = md
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+
+            // 見出しの処理 (行頭のみ)
+            if (html.startsWith("# ")) {
+                return "<h1>" + html.substring(2) + "</h1>";
+            } else if (html.startsWith("## ")) {
+                return "<h2>" + html.substring(3) + "</h2>";
+            } else if (html.startsWith("### ")) {
+                return "<h3>" + html.substring(4) + "</h3>";
+            } else if (html.startsWith("#### ")) {
+                return "<h4>" + html.substring(5) + "</h4>";
+            }
+
+            // 引用 (blockquote)
+            if (html.startsWith("> ")) {
+                return "<blockquote>" + html.substring(2) + "</blockquote>";
+            }
+
+            // チェックリスト
+            if (html.startsWith("- [ ] ")) {
+                return '<div class="preview-todo-item"><input type="checkbox" onclick="return false;"> <span>' + html.substring(6) + '</span></div>';
+            }
+            if (html.startsWith("- [x] ")) {
+                return '<div class="preview-todo-item"><input type="checkbox" checked onclick="return false;"> <span style="text-decoration: line-through; opacity: 0.6;">' + html.substring(6) + '</span></div>';
+            }
+
+            // 箇条書きリスト
+            if (html.startsWith("- ")) {
+                return "<ul><li>" + html.substring(2) + "</li></ul>";
+            }
+
+            // インラインコード ( `code` )
+            html = html.replace(/`(.*?)`/g, "<code>$1</code>");
+
+            // 太字・斜体
+            html = html.replace(/\*\*\*(.*?)\*\*\*/g, "<strong><em>$1</em></strong>");
+            html = html.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+            html = html.replace(/\*(.*?)\*/g, "<em>$1</em>");
+
+            return "<p>" + html + "</p>";
+        }
+
+        // テキストエリアの高さを自動調整
+        function autoResizeTextarea(el) {
+            el.style.height = 'auto';
+            el.style.height = el.scrollHeight + 'px';
+        }
+
+        // 行リストの描画
+        function renderHonkiRows() {
+            const container = document.getElementById('honki-editor-container');
+            if (!container) return;
+            container.innerHTML = '';
+
+            honkiLines.forEach((line, index) => {
+                const row = document.createElement('div');
+                row.className = 'editor-row';
+                row.setAttribute('data-index', index);
+
+                if (activeRowIndex === index) {
+                    // 編集状態のテキストエリア
+                    const textarea = document.createElement('textarea');
+                    textarea.className = 'row-textarea';
+                    textarea.value = line;
+                    textarea.rows = 1;
+                    
+                    textarea.addEventListener('input', (e) => {
+                        honkiLines[index] = e.target.value;
+                        autoResizeTextarea(e.target);
+                    });
+
+                    textarea.addEventListener('keydown', (e) => {
+                        handleRowKeyDown(e, index);
+                    });
+
+                    textarea.addEventListener('blur', () => {
+                        // 少し遅延させて、ボタン等の他のクリックイベントと競合させないようにする
+                        setTimeout(() => {
+                            if (activeRowIndex === index) {
+                                activeRowIndex = null;
+                                renderHonkiRows();
+                            }
+                        }, 180);
+                    });
+
+                    row.appendChild(textarea);
+                    container.appendChild(row);
+                    
+                    // 即時サイズ調整
+                    autoResizeTextarea(textarea);
+                } else {
+                    // レンダリング状態のプレビュー
+                    const preview = document.createElement('div');
+                    preview.className = 'row-preview';
+                    preview.innerHTML = parseMarkdownJS(line);
+                    
+                    preview.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        activeRowIndex = index;
+                        renderHonkiRows();
+                        setTimeout(() => {
+                            const textarea = document.querySelector(`.editor-row[data-index="${index}"] .row-textarea`);
+                            if (textarea) {
+                                textarea.focus();
+                                // クリック位置または末尾にカーソルを設定
+                                textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+                            }
+                        }, 50);
+                    });
+
+                    row.appendChild(preview);
+                    container.appendChild(row);
+                }
+            });
+        }
+
+        // キーボード操作のハンドリング
+        function handleRowKeyDown(e, index) {
+            const el = e.target;
+            const start = el.selectionStart;
+            const end = el.selectionEnd;
+            const val = el.value;
+
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                
+                // 前の行のマークダウン記法の引き継ぎ判定
+                let prefix = "";
+                if (val.startsWith("- [ ] ")) prefix = "- [ ] ";
+                else if (val.startsWith("- [x] ")) prefix = "- [ ] "; // 完了タスクも未完了で引き継ぐ
+                else if (val.startsWith("- ")) prefix = "- ";
+                
+                // もし記法だけ書いてあって中身が空の状態でEnterが押されたら、記法を解除する
+                if (val === prefix && prefix !== "") {
+                    honkiLines[index] = "";
+                    renderHonkiRows();
+                    return;
+                }
+
+                // テキストをカーソル位置で分割
+                const left = val.substring(0, start);
+                const right = val.substring(end);
+                
+                honkiLines[index] = left;
+                honkiLines.splice(index + 1, 0, prefix + right);
+                activeRowIndex = index + 1;
+                
+                renderHonkiRows();
+                
+                // 次の行にフォーカスを設定
+                setTimeout(() => {
+                    const nextEl = document.querySelector(`.editor-row[data-index="${index + 1}"] .row-textarea`);
+                    if (nextEl) {
+                        nextEl.focus();
+                        nextEl.setSelectionRange(prefix.length, prefix.length);
+                    }
+                }, 50);
+            } else if (e.key === 'Backspace') {
+                if (start === 0 && end === 0) {
+                    e.preventDefault();
+                    if (index > 0) {
+                        const prevVal = honkiLines[index - 1];
+                        const targetLen = prevVal.length;
+                        honkiLines[index - 1] = prevVal + val;
+                        honkiLines.splice(index, 1);
+                        activeRowIndex = index - 1;
+                        
+                        renderHonkiRows();
+                        
+                        setTimeout(() => {
+                            const prevEl = document.querySelector(`.editor-row[data-index="${index - 1}"] .row-textarea`);
+                            if (prevEl) {
+                                prevEl.focus();
+                                prevEl.setSelectionRange(targetLen, targetLen);
+                            }
+                        }, 50);
+                    }
+                }
+            } else if (e.key === 'ArrowUp') {
+                if (start === 0) {
+                    e.preventDefault();
+                    if (index > 0) {
+                        activeRowIndex = index - 1;
+                        renderHonkiRows();
+                        setTimeout(() => {
+                            const prevEl = document.querySelector(`.editor-row[data-index="${index - 1}"] .row-textarea`);
+                            if (prevEl) {
+                                prevEl.focus();
+                                prevEl.setSelectionRange(honkiLines[index - 1].length, honkiLines[index - 1].length);
+                            }
+                        }, 50);
+                    }
+                }
+            } else if (e.key === 'ArrowDown') {
+                if (start === val.length) {
+                    e.preventDefault();
+                    if (index < honkiLines.length - 1) {
+                        activeRowIndex = index + 1;
+                        renderHonkiRows();
+                        setTimeout(() => {
+                            const nextEl = document.querySelector(`.editor-row[data-index="${index + 1}"] .row-textarea`);
+                            if (nextEl) {
+                                nextEl.focus();
+                                nextEl.setSelectionRange(0, 0);
+                            }
+                        }, 50);
+                    }
+                }
+            }
+        }
+
+        // ツールバーボタンによるマークダウン装飾挿入
+        function insertMarkdownAtActive(type) {
+            if (activeRowIndex === null) return;
+            const textarea = document.querySelector(`.editor-row[data-index="${activeRowIndex}"] .row-textarea`);
+            if (!textarea) return;
+
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            let val = textarea.value;
+            let inserted = "";
+            let selectionOffset = 0;
+
+            switch(type) {
+                case 'h1':
+                    if (val.startsWith("# ")) {
+                        val = val.substring(2);
+                    } else {
+                        val = "# " + val.replace(/^#+\s+/, "");
+                        selectionOffset = 2;
+                    }
+                    break;
+                case 'h2':
+                    if (val.startsWith("## ")) {
+                        val = val.substring(3);
+                    } else {
+                        val = "## " + val.replace(/^#+\s+/, "");
+                        selectionOffset = 3;
+                    }
+                    break;
+                case 'bold':
+                    val = val.substring(0, start) + "**" + val.substring(start, end) + "**" + val.substring(end);
+                    selectionOffset = 2;
+                    break;
+                case 'italic':
+                    val = val.substring(0, start) + "*" + val.substring(start, end) + "*" + val.substring(end);
+                    selectionOffset = 1;
+                    break;
+                case 'list':
+                    if (val.startsWith("- ")) val = val.substring(2);
+                    else val = "- " + val.replace(/^- (\[[ x]\])?\s+/, "");
+                    selectionOffset = 2;
+                    break;
+                case 'todo':
+                    if (val.startsWith("- [ ] ")) val = val.substring(6);
+                    else val = "- [ ] " + val.replace(/^- (\[[ x]\])?\s+/, "");
+                    selectionOffset = 6;
+                    break;
+                case 'code':
+                    val = val.substring(0, start) + "`" + val.substring(start, end) + "`" + val.substring(end);
+                    selectionOffset = 1;
+                    break;
+            }
+
+            honkiLines[activeRowIndex] = val;
+            textarea.value = val;
+            autoResizeTextarea(textarea);
+            textarea.focus();
+            
+            const newCursor = end + selectionOffset;
+            textarea.setSelectionRange(newCursor, newCursor);
+        }
+
+        // エディタコンテナの余白クリック制御
+        function handleContainerClick(e) {
+            if (e.target.classList.contains('row-textarea') || e.target.classList.contains('row-preview') || e.target.closest('.row-preview')) {
+                return;
+            }
+            if (honkiLines.length > 0) {
+                activeRowIndex = honkiLines.length - 1;
+                renderHonkiRows();
+                setTimeout(() => {
+                    const lastEl = document.querySelector(`.editor-row[data-index="${honkiLines.length - 1}"] .row-textarea`);
+                    if (lastEl) {
+                        lastEl.focus();
+                        lastEl.setSelectionRange(lastEl.value.length, lastEl.value.length);
+                    }
+                }, 50);
+            }
+        }
+
+        // 保存とアップロード送信
+        function submitHonkiCapture() {
+            const titleInput = document.getElementById('honki-title');
+            const title = titleInput ? titleInput.value.trim() : '';
+            const fullText = honkiLines.join('\n');
+
+            if (!fullText.trim()) {
+                alert("内容が空です。");
+                return;
+            }
+
+            // ローディング表示
+            const overlay = document.getElementById('honki-loading-overlay');
+            if (overlay) overlay.style.display = 'flex';
+
+            const formData = new FormData();
+            formData.append('text', fullText);
+            formData.append('title_hint', title);
+
+            fetch('/inbox/new', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.text())
+            .then(html => {
+                // ローディング解除
+                if (overlay) overlay.style.display = 'none';
+                
+                // 本気メモモーダルを閉じる
+                document.getElementById('honki-editor-modal').style.display = 'none';
+                
+                // 成功トーストの表示
+                showSuccessToast("Google ドライブへメモを保存しました");
+                
+                // 完了後に Inbox リストを更新
+                const inboxContainer = document.getElementById('inbox-list-container');
+                if (inboxContainer) {
+                    inboxContainer.innerHTML = html;
+                }
+                
+                closeHonkiEditor();
+            })
+            .catch(err => {
+                if (overlay) overlay.style.display = 'none';
+                alert("アップロードに失敗しました: " + err);
+            });
+        }
+
     </script>
     <!-- 競合（順番待ち）ダイアログ表示用プレースホルダー -->
     <div id="conflict-modal" style="display: none;"></div>
