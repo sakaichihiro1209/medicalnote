@@ -513,8 +513,15 @@ def add_section(drive_file_id: str):
     # 使用頻度のカウントアップ
     knowledge_repository.increment_section_usage(sec_name, user_id=user_id)
 
-    # 追加後のノート詳細画面へ、追加されたセクションを編集状態にするパラメータを付与してリダイレクト
-    return redirect(url_for("get_card", drive_file_id=drive_file_id, edit_section=sec_name))
+    # 追加後のノート詳細画面を直接レンダリングして返却 (HTMXの相性バグを解消)
+    suggested = knowledge_repository.get_suggested_sections(user_id=user_id)
+    return render_template(
+        "partials/card_detail.html",
+        doc=doc,
+        info=info,
+        suggested_sections=suggested,
+        edit_section=sec_name
+    )
 
 
 # =====================================================================
