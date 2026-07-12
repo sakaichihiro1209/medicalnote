@@ -368,6 +368,8 @@ def edit_capture(
 
     # 3. Google ドライブへの上書きはバックグラウンドスレッドで非同期に処理
     def upload_worker():
+        from app import set_drive_task_status
+        set_drive_task_status(user_id, True, "メモの上書き修正")
         try:
             gdrive_client.set_thread_refresh_token(refresh_token)
             service = gdrive_client.get_gdrive_service(refresh_token=refresh_token)
@@ -384,6 +386,8 @@ def edit_capture(
             gdrive_client.clear_thread_refresh_token()
         except Exception as e:
             print(f"Background inbox upload failed: {e}")
+        finally:
+            set_drive_task_status(user_id, False, None)
 
     threading.Thread(target=upload_worker, daemon=True).start()
     return True

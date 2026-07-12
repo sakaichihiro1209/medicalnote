@@ -43,14 +43,8 @@
     function toggleInboxExpand(fileId) {
         const bodyDiv = document.getElementById('inbox-body-' + fileId);
         
-        // すでにロード済みの場合はトグルのみ
+        // すでにロード済みの場合はクリックしても閉じない
         if (bodyDiv.getAttribute('data-loaded') === 'true') {
-            bodyDiv.classList.toggle('expanded');
-            if (bodyDiv.classList.contains('expanded')) {
-                bodyDiv.style.maxHeight = 'none';
-            } else {
-                bodyDiv.style.maxHeight = '80px';
-            }
             return;
         }
 
@@ -63,6 +57,7 @@
                 bodyDiv.setAttribute('data-loaded', 'true');
                 bodyDiv.classList.add('expanded');
                 bodyDiv.style.maxHeight = 'none';
+                bodyDiv.style.cursor = 'default'; // 展開後はクリック無効を示すためにカーソルを戻す
                 
                 // Markdownの画像タグなどの簡易置換（ attachment:// -> /attachments/ エンドポイントへの変換 ）
                 let html = data.content;
@@ -78,10 +73,27 @@
                            '</div>';
                 });
 
-                bodyDiv.innerHTML = '<div style="white-space: pre-wrap; font-family: inherit;">' + html + '</div>';
+                // 「簡易表示に戻す」ボタンを末尾に追加
+                let closeBtn = '<div style="text-align: right; margin-top: 0.75rem; border-top: 1px dashed var(--color-border); padding-top: 0.5rem;">' +
+                               '<button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); collapseInboxCard(\'' + fileId + '\')" style="padding: 0.25rem 0.5rem; min-height: auto; font-size: 0.75rem; display: inline-flex; align-items: center; gap: 0.15rem;">' +
+                               '<span class="material-symbols-outlined" style="font-size: 0.95rem;">unfold_less</span> 簡易表示に戻す' +
+                               '</button>' +
+                               '</div>';
+
+                bodyDiv.innerHTML = '<div style="white-space: pre-wrap; font-family: inherit;">' + html + '</div>' + closeBtn;
             })
             .catch(err => {
                 bodyDiv.innerHTML = '<span style="color: var(--color-danger);">読み込みに失敗しました</span>';
             });
+    }
+
+    // カードを折りたたむ
+    function collapseInboxCard(fileId) {
+        const bodyDiv = document.getElementById('inbox-body-' + fileId);
+        bodyDiv.removeAttribute('data-loaded');
+        bodyDiv.classList.remove('expanded');
+        bodyDiv.style.maxHeight = '80px';
+        bodyDiv.style.cursor = 'pointer';
+        bodyDiv.innerHTML = '<div style="font-size: 0.8rem; color: var(--color-text-gray);">クリックして本文を表示...</div>';
     }
 </script>

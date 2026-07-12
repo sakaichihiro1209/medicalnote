@@ -670,24 +670,13 @@ def edit_capture(drive_file_id: str):
     user_id = session.get("google_user_id")
     refresh_token = session.get("google_refresh_token")
 
-    # 非同期でのアップロード実行
-    def bg_edit():
-        set_drive_task_status(user_id, True, "メモの上書き修正")
-        try:
-            gdrive_client.set_thread_refresh_token(refresh_token)
-            inbox_repository.edit_capture(
-                drive_file_id, title, text, new_images=images, user_id=user_id
-            )
-            inbox_repository.rebuild_inbox_cache(user_id=user_id)
-            gdrive_client.clear_thread_refresh_token()
-        except Exception as e:
-            print(f"Background edit task failed: {e}")
-        finally:
-            set_drive_task_status(user_id, False, None)
+    # 1. ローカル SQLite キャッシュを即時（同期）で更新！
+    # これにより、返却する UI リストへ即座に変更が反映されます。
+    inbox_repository.edit_capture(
+        drive_file_id, title, text, new_images=images, user_id=user_id
+    )
 
-    threading.Thread(target=bg_edit).start()
-
-    # 即座にレスポンスを返す
+    # 2. 即座に最新のキャッシュリストをレンダリングして返却
     captures = inbox_repository.list_captures(user_id=user_id)
     return make_inbox_list_response(captures, user_id=user_id)
 
