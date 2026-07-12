@@ -159,7 +159,9 @@ header {
 }
 
 .pane-inbox-panel {
-  width: 380px;
+  width: 33vw;
+  min-width: 380px;
+  max-width: 550px;
   background: rgba(255, 255, 255, 0.95);
   border-left: 1px solid var(--color-border);
   display: flex;

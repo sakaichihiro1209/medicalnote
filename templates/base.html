@@ -927,5 +927,32 @@
     </script>
     <!-- 競合（順番待ち）ダイアログ表示用プレースホルダー -->
     <div id="conflict-modal" style="display: none;"></div>
+
+    <!-- 画像拡大モーダル -->
+    <div id="image-zoom-modal" class="modal-overlay" style="display: none; justify-content: center; align-items: center; background: rgba(0, 0, 0, 0.85); z-index: 1000;" onclick="closeImageZoomModal()">
+        <div style="position: relative; max-width: 90%; max-height: 90%; display: flex; justify-content: center; align-items: center;" onclick="event.stopPropagation()">
+            <img id="image-zoom-content" src="" style="max-width: 100%; max-height: 100%; border-radius: var(--radius-md); box-shadow: 0 4px 20px rgba(0,0,0,0.5); object-fit: contain; cursor: zoom-out;" onclick="closeImageZoomModal()">
+            <button type="button" style="position: absolute; top: -40px; right: 0; background: transparent; border: none; color: white; cursor: pointer; display: flex; align-items: center; gap: 0.25rem; font-size: 1rem;" onclick="closeImageZoomModal()">
+                <span class="material-symbols-outlined" style="font-size: 1.8rem;">close</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- marked.js CDN ロード -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <script>
+        window.openImageZoomModal = function(src) {
+            const modal = document.getElementById('image-zoom-modal');
+            const modalImg = document.getElementById('image-zoom-content');
+            modalImg.src = src;
+            modal.style.display = 'flex';
+        };
+
+        window.closeImageZoomModal = function() {
+            const modal = document.getElementById('image-zoom-modal');
+            modal.style.display = 'none';
+        };
+    </script>
 </body>
 </html>
