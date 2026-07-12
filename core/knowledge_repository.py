@@ -447,8 +447,9 @@ def create_card(title: str, user_id: str | None = None) -> str | None:
     """指定されたタイトルで SQLite キャッシュに即時仮登録し、Google ドライブへは非同期で新規作成する。"""
     # セッションからトークンとIDの解決
     refresh_token = None
-    if not user_id and has_request_context():
-        user_id = session.get("google_user_id")
+    if has_request_context():
+        if not user_id:
+            user_id = session.get("google_user_id")
         refresh_token = session.get("google_refresh_token")
 
     # 既存チェック
@@ -502,8 +503,9 @@ def save_card(drive_file_id: str, doc: markdown_parser.KnowledgeDocument, user_i
     text = markdown_parser.render_markdown(doc)
     
     refresh_token = None
-    if not user_id and has_request_context():
-        user_id = session.get("google_user_id")
+    if has_request_context():
+        if not user_id:
+            user_id = session.get("google_user_id")
         refresh_token = session.get("google_refresh_token")
 
     # 1. ローカルの SQLite キャッシュDBを即時（ゼロ遅延）更新
@@ -538,8 +540,9 @@ def save_card(drive_file_id: str, doc: markdown_parser.KnowledgeDocument, user_i
 def delete_card(drive_file_id: str, user_id: str | None = None) -> bool:
     """SQLite キャッシュから即時削除し、Google ドライブからは非同期で物理削除する。"""
     refresh_token = None
-    if not user_id and has_request_context():
-        user_id = session.get("google_user_id")
+    if has_request_context():
+        if not user_id:
+            user_id = session.get("google_user_id")
         refresh_token = session.get("google_refresh_token")
 
     db = database.connect(user_id=user_id)
