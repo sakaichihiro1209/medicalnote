@@ -135,6 +135,13 @@
             <input type="hidden" name="client_id" value="{{ client_id }}">
             <input type="hidden" name="client_secret" value="{{ client_secret }}">
 
+            <div style="margin-bottom: 1rem;">
+                <label for="settings-user-role" style="font-size: 0.85rem; font-weight: 600; color: var(--color-text-gray); display: block; margin-bottom: 0.35rem;">
+                    あなたの身分（例: 医師、看護師、学生）
+                </label>
+                <input type="text" name="user_role" class="input-text" id="settings-user-role" value="{{ user_role or '' }}" placeholder="例: 学生">
+            </div>
+
             <div style="margin-bottom: 1.5rem;">
                 <label for="settings-vault-id" style="font-size: 0.85rem; font-weight: 600; color: var(--color-text-gray); display: block; margin-bottom: 0.35rem;">
                     GDRIVE_VAULT_FOLDER_ID (任意)
@@ -145,7 +152,7 @@
             <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
                 <button type="button" class="btn btn-secondary" onclick="closeGoogleSettingsModal()">閉じる</button>
                 <button type="submit" class="btn btn-primary" style="background-color: #4285F4; border-color: #4285F4;">
-                    Google アカウントでログイン
+                    {% if google_connected %}設定を保存{% else %}Google アカウントでログイン{% endif %}
                 </button>
             </div>
         </form>

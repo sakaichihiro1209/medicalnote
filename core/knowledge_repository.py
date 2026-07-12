@@ -151,7 +151,7 @@ def rebuild_cache_from_gdrive(user_id: str | None = None) -> Dict[str, int]:
 
     try:
         # トランザクション外でドライブ上のセクション色情報を先にローカルDBへ同期
-        sync_section_colors_from_gdrive(db)
+        sync_vault_settings_from_gdrive(user_id=user_id, db=db)
 
         # 現在の SQLite キャッシュ上のファイル情報を取得
         cur = db.execute("SELECT drive_file_id, updated_at, dirty FROM knowledge")
@@ -265,7 +265,7 @@ def rebuild_cache_from_gdrive(user_id: str | None = None) -> Dict[str, int]:
 
         # 割り当てた新しい色情報も含めてドライブ側へ上書き保存
         gdrive_client.set_thread_refresh_token(refresh_token)
-        save_section_colors_to_gdrive(db=db)
+        save_vault_settings_to_gdrive(user_id=user_id)
         gdrive_client.clear_thread_refresh_token()
 
         return {"restored": restored, "skipped": skipped}
@@ -539,41 +539,51 @@ def check_cache_empty(user_id: str | None = None) -> bool:
         db.close()
 
 
-def sync_section_colors_from_gdrive(db=None) -> None:
-    """Googleドライブ上の system/section_colors.json からセクション名とカラーのマッピングを同期する。"""
-    structure = gdrive_client.ensure_vault_structure()
-    if not structure or "system" not in structure:
+def sync_vault_settings_from_gdrive(user_id: str | None = None, db=None) -> None:
+    """Google ドライブ上の My_Vault/vault_settings.json から、身分情報(user_role)とセクションカラー設定をロードして SQLite DB に反映する。"""
+    from flask import has_request_context, session
+    refresh_token = None
+    if not user_id and has_request_context():
+        user_id = session.get("google_user_id")
+        refresh_token = session.get("google_refresh_token")
+
+    structure = gdrive_client.ensure_vault_structure(user_id=user_id)
+    if not structure or "root" not in structure:
         return
 
-    system_folder_id = structure["system"]
-    files = gdrive_client.list_files_in_folder(system_folder_id)
+    root_folder_id = structure["root"]
+    files = gdrive_client.list_files_in_folder(root_folder_id, refresh_token=refresh_token)
 
-    # section_colors.jsonを探す
     json_file_id = None
     for f in files:
-        if f["name"] == "section_colors.json":
+        if f["name"] == "vault_settings.json":
             json_file_id = f["id"]
             break
 
     if not json_file_id:
         return
 
-    text = gdrive_client.download_file_content(json_file_id)
+    text = gdrive_client.download_file_content(json_file_id, refresh_token=refresh_token)
     if not text:
         return
 
     try:
         data = json.loads(text)
+        user_role = data.get("user_role", "").strip()
         colors = data.get("section_colors", {})
 
-        # SQLite側へ反映
-        local_db = db or database.connect()
+        local_db = db or database.connect(user_id=user_id)
         ts = database.now_iso()
         try:
-            # トランザクション処理
             with local_db:
+                # 1. 身分情報 (user_role) を反映
+                if user_role:
+                    local_db.execute(
+                        "INSERT OR REPLACE INTO user_config (key, value) VALUES ('user_role', ?)",
+                        (user_role,)
+                    )
+                # 2. セクション色情報を反映
                 for name, color in colors.items():
-                    # 既に存在するかチェック
                     cur = local_db.execute("SELECT id FROM section_master WHERE section_name = ?", (name,))
                     row = cur.fetchone()
                     if row:
@@ -591,46 +601,62 @@ def sync_section_colors_from_gdrive(db=None) -> None:
             if not db:
                 local_db.close()
     except Exception as e:
-        print(f"Error syncing section colors from gdrive: {e}")
+        settings.log_debug(f"Error syncing vault settings from gdrive: {e}")
 
 
-def save_section_colors_to_gdrive() -> None:
-    """現在の SQLite 内のセクション色マッピングを Google ドライブ上の system/section_colors.json へアップロード保存する。"""
-    structure = gdrive_client.ensure_vault_structure()
-    if not structure or "system" not in structure:
+def save_vault_settings_to_gdrive(user_id: str | None = None) -> None:
+    """現在の SQLite 内の身分情報(user_role)とセクションカラー設定をまとめて Google ドライブ上の My_Vault/vault_settings.json へ保存する。"""
+    from flask import has_request_context, session
+    refresh_token = None
+    if not user_id and has_request_context():
+        user_id = session.get("google_user_id")
+        refresh_token = session.get("google_refresh_token")
+
+    structure = gdrive_client.ensure_vault_structure(user_id=user_id)
+    if not structure or "root" not in structure:
         return
 
-    # 現在のマッピングをDBから取得
-    db = database.connect()
+    # 現在の身分情報と色設定をDBから取得
+    db = database.connect(user_id=user_id)
+    user_role = ""
+    colors = {}
     try:
+        # 身分情報の取得
+        cur = db.execute("SELECT value FROM user_config WHERE key = 'user_role'")
+        row = cur.fetchone()
+        if row:
+            user_role = row["value"]
+
+        # セクション色設定の取得
         cur = db.execute("SELECT section_name, color FROM section_master WHERE color IS NOT NULL")
         colors = {row["section_name"]: row["color"] for row in cur.fetchall()}
+    except Exception as e:
+        settings.log_debug(f"Failed to load user config/colors from DB to sync: {e}")
     finally:
         db.close()
 
-    if not colors:
-        return
+    root_folder_id = structure["root"]
+    files = gdrive_client.list_files_in_folder(root_folder_id, refresh_token=refresh_token)
 
-    system_folder_id = structure["system"]
-    files = gdrive_client.list_files_in_folder(system_folder_id)
-
-    # 既存のファイルを探す
     json_file_id = None
     for f in files:
-        if f["name"] == "section_colors.json":
+        if f["name"] == "vault_settings.json":
             json_file_id = f["id"]
             break
 
-    content_data = {"section_colors": colors}
+    content_data = {
+        "user_role": user_role,
+        "section_colors": colors
+    }
     content_str = json.dumps(content_data, ensure_ascii=False, indent=4)
 
     # アップロード
-    gdrive_client.upload_file_content(system_folder_id, "section_colors.json", content_str, file_id=json_file_id)
+    gdrive_client.upload_file_content(root_folder_id, "vault_settings.json", content_str, file_id=json_file_id, refresh_token=refresh_token)
 
 
-def get_or_create_section_color(section_name: str) -> str:
+def get_or_create_section_color(section_name: str, user_id: str | None = None) -> str:
     """指定されたセクションの色を取得する。未定義の場合は新しく一意な色を割り当てて保存する。"""
-    db = database.connect()
+    db = database.connect(user_id=user_id)
     try:
         # DBから色を探す
         cur = db.execute("SELECT color FROM section_master WHERE section_name = ?", (section_name,))
@@ -673,7 +699,7 @@ def get_or_create_section_color(section_name: str) -> str:
                 )
 
         # ドライブに保存
-        save_section_colors_to_gdrive()
+        save_vault_settings_to_gdrive(user_id=user_id)
 
         return allocated_color
     except sqlite3.Error as e:

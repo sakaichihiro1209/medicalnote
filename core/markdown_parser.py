@@ -30,6 +30,8 @@ from typing import List, Optional
 class Section:
     name: str
     content: str = ""
+    updated_at: str = ""
+    updated_by: str = ""
 
 
 @dataclass
@@ -74,7 +76,27 @@ def parse_markdown(text: str) -> KnowledgeDocument:
         nonlocal current_name, current_lines
         if current_name is not None:
             content = "\n".join(current_lines).strip("\n")
-            sections.append(Section(name=current_name, content=content))
+            updated_at = ""
+            updated_by = ""
+            
+            content_cleaned = content.lstrip()
+            updated_match = re.match(
+                r"^<!--\s*updated:\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s*(?:\((.*?)\))?\s*-->",
+                content_cleaned
+            )
+            if updated_match:
+                updated_at = updated_match.group(1)
+                updated_by = updated_match.group(2) or ""
+                # コメントタグを除去して本文を再取得
+                match_len = updated_match.end()
+                content = content_cleaned[match_len:].strip("\n")
+                
+            sections.append(Section(
+                name=current_name,
+                content=content,
+                updated_at=updated_at,
+                updated_by=updated_by
+            ))
         current_name = None
         current_lines = []
 
@@ -105,7 +127,10 @@ def render_markdown(doc: KnowledgeDocument) -> str:
     parts = [f"# {doc.title}\n"]
     for sec in doc.sections:
         content = sec.content.strip("\n")
-        parts.append(f"\n## {sec.name}\n\n{content}\n")
+        meta_comment = ""
+        if sec.updated_at:
+            meta_comment = f"<!-- updated:{sec.updated_at} ({sec.updated_by or ''}) -->\n"
+        parts.append(f"\n## {sec.name}\n{meta_comment}{content}\n")
     text = "\n".join(parts).strip("\n") + "\n"
     return text
 

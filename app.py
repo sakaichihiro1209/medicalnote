@@ -4,6 +4,9 @@ Jinja2 テンプレートと HTMX 部分更新を駆使したレスポンシブW
 """
 
 import os
+from datetime import datetime
+import re
+import html
 from flask import (
     Flask,
     render_template,
@@ -91,7 +94,23 @@ def check_drive_lock_and_respond():
 @app.template_filter("section_color_class")
 def section_color_class(name: str) -> str:
     """セクション名からパステルカラー用のCSSクラスを一意に割り当てる。"""
-    return knowledge_repository.get_or_create_section_color(name)
+    user_id = session.get("google_user_id")
+    return knowledge_repository.get_or_create_section_color(name, user_id=user_id)
+
+
+@app.template_filter("render_section_content")
+def render_section_content_filter(content: str) -> str:
+    """セクション本文内のwiki://ノートリンクを HTMX で遷移するアンカータグに置換する。"""
+    if not content:
+        return ""
+    # HTML エスケープして安全にする
+    escaped = html.escape(content)
+    # wiki リンク [タイトル](wiki://ファイルID) ➔ HTMX SPA リンクへ置換
+    pattern = r"\[(.*?)\]\(wiki://(.*?)\)"
+    replacement = r'<a href="/knowledge/\2" hx-get="/knowledge/\2" hx-target="#detail-pane" hx-push-url="true" onclick="event.stopPropagation();" class="wiki-link" style="color: var(--color-primary); font-weight: bold; text-decoration: underline;">\1</a>'
+    
+    rendered = re.sub(pattern, replacement, escaped)
+    return rendered
 
 
 @app.errorhandler(Exception)
@@ -307,10 +326,11 @@ def google_logout():
 
 @app.route("/settings/save", methods=["POST"])
 def save_app_settings():
-    """クライアントID、シークレットなどを永続保存し、そのままGoogle認証を開始する。"""
+    """クライアントID、シークレット、および身分設定を永続保存する。"""
     client_id = request.form.get("client_id", "").strip()
     client_secret = request.form.get("client_secret", "").strip()
     vault_folder_id = request.form.get("vault_folder_id", "").strip()
+    user_role = request.form.get("user_role", "").strip()
 
     if client_id:
         settings.set_val("GOOGLE_CLIENT_ID", client_id)
@@ -318,6 +338,32 @@ def save_app_settings():
         settings.set_val("GOOGLE_CLIENT_SECRET", client_secret)
     if vault_folder_id:
         settings.set_val("GDRIVE_VAULT_FOLDER_ID", vault_folder_id)
+
+    user_id = session.get("google_user_id")
+    if user_id:
+        # ローカル DB に保存
+        db = database.connect(user_id=user_id)
+        try:
+            with db:
+                db.execute(
+                    "INSERT OR REPLACE INTO user_config (key, value) VALUES ('user_role', ?)",
+                    (user_role,)
+                )
+        except Exception as e:
+            print(f"Failed to save user_role: {e}")
+        finally:
+            db.close()
+        
+        # Google ドライブへ vault_settings.json を即座に上書き保存
+        try:
+            knowledge_repository.save_vault_settings_to_gdrive(user_id=user_id)
+        except Exception as e:
+            print(f"Failed to sync settings to gdrive: {e}")
+
+    google_connected = gdrive_client.get_credentials(user_id=user_id) is not None
+    if google_connected:
+        # すでに連携完了している場合は、ホームに戻るだけにする
+        return redirect(url_for("index"))
 
     return redirect(url_for("google_login"))
 
@@ -352,6 +398,19 @@ def index():
     current_client_secret = settings.get("GOOGLE_CLIENT_SECRET") or ""
     current_vault_folder_id = settings.get("GDRIVE_VAULT_FOLDER_ID") or ""
 
+    user_role = ""
+    if google_connected and user_id:
+        db = database.connect(user_id=user_id)
+        try:
+            cur = db.execute("SELECT value FROM user_config WHERE key = 'user_role'")
+            row = cur.fetchone()
+            if row:
+                user_role = row["value"]
+        except Exception:
+            pass
+        finally:
+            db.close()
+
     return render_template(
         "index.html",
         google_connected=google_connected,
@@ -363,6 +422,7 @@ def index():
         client_id=current_client_id,
         client_secret=current_client_secret,
         vault_folder_id=current_vault_folder_id,
+        user_role=user_role,
     )
 
 
@@ -373,6 +433,20 @@ def search_cards():
     user_id = session.get("google_user_id")
     cards = knowledge_repository.list_cards(user_id=user_id, query=query)
     return render_template("partials/knowledge_list.html", cards=cards)
+
+
+@app.route("/api/knowledge/search", methods=["GET"])
+def search_knowledge_api():
+    """他ノートリンク挿入用に、カードのタイトル部分一致検索を行い HTML フラグメントを返却する。"""
+    query = request.args.get("q", "").strip()
+    user_id = session.get("google_user_id")
+    index = request.args.get("index", "1")
+    
+    cards = []
+    if user_id:
+        cards = knowledge_repository.list_cards(user_id=user_id, query=query)
+        
+    return render_template("partials/link_search_results.html", cards=cards, index=index)
 
 
 # =====================================================================
@@ -501,10 +575,25 @@ def save_section(drive_file_id: str, section_name: str):
     new_content = request.form.get("content", "")
     index = request.form.get("index", "1")
 
-    # ドキュメント内のセクション本文を更新
+    # 現在の身分情報を取得
+    user_role = ""
+    db = database.connect(user_id=user_id)
+    try:
+        cur = db.execute("SELECT value FROM user_config WHERE key = 'user_role'")
+        row = cur.fetchone()
+        if row:
+            user_role = row["value"]
+    except Exception:
+        pass
+    finally:
+        db.close()
+
+    # ドキュメント内のセクション本文とメタデータを更新
     section = doc.get_section(section_name)
     if section:
         section.content = new_content
+        section.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+        section.updated_by = user_role
     else:
         return "Section not found", 404
 
@@ -537,8 +626,27 @@ def add_section(drive_file_id: str):
     if doc.get_section(sec_name):
         return f"<script>alert('セクション「{sec_name}」は既にこのノートに存在します。');</script>", 400
 
+    # 現在の身分情報を取得
+    user_role = ""
+    db = database.connect(user_id=user_id)
+    try:
+        cur = db.execute("SELECT value FROM user_config WHERE key = 'user_role'")
+        row = cur.fetchone()
+        if row:
+            user_role = row["value"]
+    except Exception:
+        pass
+    finally:
+        db.close()
+
     # 新規セクションの追加
-    doc.sections.append(markdown_parser.Section(name=sec_name, content=""))
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+    doc.sections.append(markdown_parser.Section(
+        name=sec_name,
+        content="",
+        updated_at=ts,
+        updated_by=user_role
+    ))
     success = knowledge_repository.save_card(drive_file_id, doc, user_id=user_id)
     if not success:
         return "<script>alert('追加に失敗しました。');</script>", 500

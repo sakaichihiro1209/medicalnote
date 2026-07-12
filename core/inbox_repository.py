@@ -298,6 +298,9 @@ def edit_capture(
     else:
         created_at_line = f"作成日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
+    # 既存のすべての「修正日時」行を抽出 (累積ログにするため)
+    past_updates = re.findall(r"^修正日時:\s*\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}", existing_content, re.MULTILINE)
+
     # 既存の画像リンク ![](attachment://file_id) を抽出して退避
     existing_image_links = re.findall(r"\!\[\]\(attachment://[a-zA-Z0-9_-]+\)", existing_content)
 
@@ -338,9 +341,11 @@ def edit_capture(
         f"# {heading}",
         "",
         created_at_line,
-        f"修正日時: {now_str}",
-        "",
     ]
+    for past_upd in past_updates:
+        content_lines.append(past_upd)
+    content_lines.append(f"修正日時: {now_str}")
+    content_lines.append("")
     if new_text.strip():
         content_lines.append(new_text.strip())
         content_lines.append("")
