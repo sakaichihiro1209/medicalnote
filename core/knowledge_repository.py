@@ -40,33 +40,10 @@ def _process_async_save(payload):
     local_updated_at = payload["local_updated_at"]
     user_id = payload.get("user_id")
     refresh_token = payload.get("refresh_token")
-    
-    # 競合判定チェック (ドライブ側が新しければダウンロードして上書き、アップロードはスキップ)
     service = gdrive_client.get_gdrive_service(refresh_token=refresh_token)
     if not service:
+        print(f"[Sync Worker] Failed to get drive service for async save of {drive_file_id}")
         return
-    try:
-        file_meta = service.files().get(fileId=drive_file_id, fields="modifiedTime").execute()
-        drive_modified = file_meta.get("modifiedTime")
-        if drive_modified and _is_drive_newer(drive_modified, local_updated_at):
-            print(f"[Sync Worker] Conflict detected for {drive_file_id} (user: {user_id}). Overwriting local cache with drive changes.")
-            drive_text = gdrive_client.download_file_content(drive_file_id, refresh_token=refresh_token)
-            if drive_text:
-                doc = markdown_parser.parse_markdown(drive_text)
-                db = database.connect(user_id=user_id)
-                try:
-                    with db:
-                        db.execute(
-                            "UPDATE knowledge SET title = ?, content = ?, updated_at = ?, dirty = 0 WHERE drive_file_id = ?",
-                            (doc.title, drive_text, drive_modified, drive_file_id)
-                        )
-                except Exception as ex:
-                    print(f"[Sync Worker] Failed to resolve conflict: {ex}")
-                finally:
-                    db.close()
-            return
-    except Exception as e:
-        print(f"[Sync Worker] Failed conflict check: {e}")
 
     # 特定ユーザーの資格情報を使用してドライブ構造を確認
     structure = gdrive_client.ensure_vault_structure(user_id=user_id, refresh_token=refresh_token)
