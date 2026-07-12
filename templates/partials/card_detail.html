@@ -127,4 +127,44 @@
             el.style.display = isActive ? 'block' : 'none';
         });
     }
+
+    // SortableJS のバインド
+    (function() {
+        const container = document.getElementById('sections-container');
+        if (container && typeof Sortable !== 'undefined') {
+            Sortable.create(container, {
+                animation: 250,
+                ghostClass: 'sortable-ghost',
+                chosenClass: 'sortable-chosen',
+                dragClass: 'sortable-drag',
+                forceFallback: false,
+                onEnd: function (evt) {
+                    if (evt.oldIndex === evt.newIndex) return;
+                    
+                    const wrappers = container.querySelectorAll('[data-section-name]');
+                    const sortedNames = Array.from(wrappers).map(el => el.getAttribute('data-section-name'));
+                    
+                    const fileId = "{{ info.drive_file_id }}";
+                    fetch('/knowledge/' + fileId + '/sections/reorder', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ section_names: sortedNames })
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            console.log('Reorder saved successfully.');
+                        } else {
+                            alert('並び替えの保存に失敗しました。');
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Failed to save reorder:', err);
+                    });
+                }
+            });
+        }
+    })();
 </script>

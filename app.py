@@ -619,6 +619,41 @@ def save_section(drive_file_id: str, section_name: str):
     )
 
 
+@app.route("/knowledge/<drive_file_id>/sections/reorder", methods=["POST"])
+def reorder_sections(drive_file_id: str):
+    """ドラッグ＆ドロップによるセクションの順番並び替え要求を処理し、非同期で Google ドライブへ保存する。"""
+    user_id = session.get("google_user_id")
+    doc, info = knowledge_repository.get_card_by_id(drive_file_id, user_id=user_id)
+    if not doc or not info:
+        return jsonify({"status": "error", "message": "Card not found"}), 404
+
+    req_data = request.json or {}
+    new_order = req_data.get("section_names", [])
+    if not new_order:
+        return jsonify({"status": "error", "message": "No section order provided"}), 400
+
+    # doc.sections を新しい順番にソート
+    name_to_sec = {sec.name: sec for sec in doc.sections}
+    sorted_sections = []
+    for name in new_order:
+        if name in name_to_sec:
+            sorted_sections.append(name_to_sec[name])
+    
+    # 漏れ防止 (新規追加直後などで一致しないものがあれば末尾に付加)
+    for sec in doc.sections:
+        if sec not in sorted_sections:
+            sorted_sections.append(sec)
+
+    doc.sections = sorted_sections
+
+    # 非同期保存の実行 (内部で別スレッドが立ち上がり、トースト通知も自動連携される)
+    success = knowledge_repository.save_card(drive_file_id, doc, user_id=user_id)
+    if not success:
+        return jsonify({"status": "error", "message": "Failed to initiate save"}), 500
+
+    return jsonify({"status": "success"})
+
+
 @app.route("/knowledge/<drive_file_id>/sections/add", methods=["POST"])
 def add_section(drive_file_id: str):
     """セクションをカードへ追加し、上書き保存する。同名がある場合はエラー。"""
