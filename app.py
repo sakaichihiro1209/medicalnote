@@ -17,6 +17,7 @@ from flask import (
     jsonify,
     Response,
     send_file,
+    make_response,
 )
 from google_auth_oauthlib.flow import Flow
 import io
@@ -513,19 +514,15 @@ def delete_card(drive_file_id: str):
 
     # 削除後は一覧をリフレッシュさせつつウェルカム画面を返す
     # HTMXで親要素や一覧を自動更新するために、クライアントサイドへのイベント発行ヘッダーを付与
-    response = Response(
-        render_template("index.html")
-    )  # ダミーの空レイアウトとしてウェルカム画面を返す
-    response.headers["HX-Trigger"] = "search-input"  # 一覧検索トリガーを起動してリフレッシュ
-    
-    # シンプルなウェルカムメッセージ断片を返却
-    return (
+    response = make_response(
         "<div class='welcome-container'>"
         "<span class='material-symbols-outlined welcome-icon'>medical_services</span>"
         "<h2 class='welcome-title'>削除しました</h2>"
         "<p class='welcome-text'>カードの削除が完了しました。</p>"
         "</div>"
     )
+    response.headers["HX-Trigger"] = "search-input"  # 一覧検索トリガーを起動してリフレッシュ
+    return response
 
 
 # =====================================================================
