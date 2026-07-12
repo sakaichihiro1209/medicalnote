@@ -85,7 +85,7 @@ def rebuild_inbox_cache(user_id: str | None = None) -> int:
                 is_organized = existing_map.get(file_id, 0)
 
                 # ファイル名から日付を解析し、タイトルはファイル名（拡張子除く）そのままとする
-                dt = datetime.now()
+                dt = database.now_jst()
                 title = name[:-3] if name.lower().endswith(".md") else name
 
                 if len(name) >= 16 and name[8] == "_" and name[15] == "_":
@@ -188,7 +188,7 @@ def create_capture(
     inbox_folder_id = structure["inbox"]
     attachments_folder_id = structure["attachments"]
 
-    now = datetime.now()
+    now = database.now_jst()
     stamp = now.strftime("%Y%m%d_%H%M%S")
 
     # 見出し語の決定
@@ -296,7 +296,7 @@ def edit_capture(
     if created_match:
         created_at_line = f"作成日時: {created_match.group(1)}"
     else:
-        created_at_line = f"作成日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        created_at_line = f"作成日時: {database.now_jst().strftime('%Y-%m-%d %H:%M:%S')}"
 
     # 既存のすべての「修正日時」行を抽出 (累積ログにするため)
     past_updates = re.findall(r"^修正日時:\s*\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}", existing_content, re.MULTILINE)
@@ -304,7 +304,7 @@ def edit_capture(
     # 既存の画像リンク ![](attachment://file_id) を抽出して退避
     existing_image_links = re.findall(r"\!\[\]\(attachment://[a-zA-Z0-9_-]+\)", existing_content)
 
-    now = datetime.now()
+    now = database.now_jst()
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
     stamp = now.strftime("%Y%m%d_%H%M%S")
 

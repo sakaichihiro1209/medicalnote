@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List
 from flask import session, has_request_context
@@ -70,8 +70,15 @@ def get_db_path(user_id: str | None = None) -> Path:
     return Path(f"/tmp/{db_filename}")
 
 
+JST = timezone(timedelta(hours=9))
+
+def now_jst() -> datetime:
+    """日本時間 (JST) の現在日時を返す。"""
+    return datetime.now(JST)
+
 def now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    """日本時間の ISO 8601 文字列を返す。"""
+    return now_jst().isoformat(timespec="seconds")
 
 
 def connect(user_id: str | None = None) -> sqlite3.Connection:

@@ -592,7 +592,7 @@ def save_section(drive_file_id: str, section_name: str):
     section = doc.get_section(section_name)
     if section:
         section.content = new_content
-        section.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+        section.updated_at = database.now_jst().strftime("%Y-%m-%d %H:%M")
         section.updated_by = user_role
     else:
         return "Section not found", 404
@@ -640,7 +640,7 @@ def add_section(drive_file_id: str):
         db.close()
 
     # 新規セクションの追加
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+    ts = database.now_jst().strftime("%Y-%m-%d %H:%M")
     doc.sections.append(markdown_parser.Section(
         name=sec_name,
         content="",
