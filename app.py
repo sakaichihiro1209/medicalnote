@@ -360,9 +360,20 @@ def save_app_settings():
         finally:
             db.close()
         
-        # Google ドライブへ vault_settings.json を即座に上書き保存
+        # Google ドライブへ vault_settings.json を非同期スレッドでバックグラウンド保存
         try:
-            knowledge_repository.save_vault_settings_to_gdrive(user_id=user_id)
+            refresh_token = session.get("google_refresh_token")
+            def async_save_settings():
+                from core import gdrive_client
+                gdrive_client.set_thread_refresh_token(refresh_token)
+                try:
+                    knowledge_repository.save_vault_settings_to_gdrive(user_id=user_id)
+                except Exception as e:
+                    print(f"Failed to sync settings to gdrive asynchronously: {e}")
+                finally:
+                    gdrive_client.clear_thread_refresh_token()
+                    
+            threading.Thread(target=async_save_settings, daemon=True).start()
         except Exception as e:
             print(f"Failed to sync settings to gdrive: {e}")
 

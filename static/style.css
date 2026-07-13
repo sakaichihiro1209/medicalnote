@@ -965,6 +965,17 @@ header {
 }
 
 /* SortableJS ドラッグ時のビジュアル */
+/* 編集モード中（.edit-formが存在する親ラッパー）は、スケール縮小やゴースト表示を適用しない */
+div:has(.edit-form).sortable-chosen,
+div:has(.edit-form).sortable-ghost,
+div:has(.edit-form).sortable-drag {
+  transform: none !important;
+  opacity: 1 !important;
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
 .sortable-ghost {
   opacity: 0.35 !important;
   background: var(--color-bg-light) !important;

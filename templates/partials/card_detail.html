@@ -138,6 +138,8 @@
                 chosenClass: 'sortable-chosen',
                 dragClass: 'sortable-drag',
                 forceFallback: false,
+                filter: '.edit-form, textarea, input, button, .btn',
+                preventOnFilter: false,
                 onEnd: function (evt) {
                     if (evt.oldIndex === evt.newIndex) return;
                     

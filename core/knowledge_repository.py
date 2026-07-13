@@ -304,8 +304,31 @@ def list_cards(user_id: str | None = None, query: str = "") -> List[Dict]:
         db.close()
 
 
+def resolve_real_file_id(drive_file_id: str, user_id: str | None = None) -> str:
+    """一時ID (temp_...) が渡された場合、もし既にスレッドによる作成が完了していれば本物のドライブファイルIDへ解決して返す。"""
+    if not drive_file_id or not drive_file_id.startswith("temp_"):
+        return drive_file_id
+        
+    db = database.connect(user_id=user_id)
+    try:
+        # この一時IDと同じタイトルを持つレコードから現在の drive_file_id を取得
+        cur = db.execute(
+            "SELECT drive_file_id FROM knowledge WHERE title = (SELECT title FROM knowledge WHERE drive_file_id = ?)",
+            (drive_file_id,)
+        )
+        row = cur.fetchone()
+        if row:
+            return row["drive_file_id"]
+    except Exception:
+        pass
+    finally:
+        db.close()
+    return drive_file_id
+
+
 def get_card_by_id(drive_file_id: str, user_id: str | None = None) -> Tuple[Optional[markdown_parser.KnowledgeDocument], Optional[Dict]]:
     """指定された ID のカードをキャッシュDB（フォールバックでGoogleドライブ）から読み込んでパースしたオブジェクトとDB情報を取得する。"""
+    drive_file_id = resolve_real_file_id(drive_file_id, user_id=user_id)
     is_sync = False
     if has_request_context():
         try:
@@ -353,7 +376,7 @@ def get_card_by_id(drive_file_id: str, user_id: str | None = None) -> Tuple[Opti
 
 
 def create_card(title: str, user_id: str | None = None) -> str | None:
-    """指定されたタイトルで Google ドライブに同期（即時）で新規ノートを作成し、SQLite キャッシュにも登録する。"""
+    """指定されたタイトルで SQLite キャッシュに一時IDで即時登録し、Google ドライブへはバックグラウンドスレッドで新規ノートを作成する。"""
     from flask import has_request_context, session
     refresh_token = None
     if has_request_context():
@@ -376,51 +399,99 @@ def create_card(title: str, user_id: str | None = None) -> str | None:
     finally:
         db.close()
 
-    # ドライブへの即時接続とフォルダ解決
-    service = gdrive_client.get_gdrive_service(refresh_token=refresh_token)
-    if not service:
-        print(f"Failed to get drive service for sync card creation of {title}")
-        return None
-
-    try:
-        root_id = gdrive_client.get_or_create_folder(service, None, "My_Vault")
-        parent_id = gdrive_client.get_or_create_folder(service, root_id, "Knowledge")
-    except Exception as e:
-        print(f"Failed to resolve Vault structure on sync card creation of {title}: {e}")
-        return None
+    # 一時 ID の生成 (uuid)
+    import uuid
+    temp_file_id = f"temp_{uuid.uuid4().hex}"
 
     # 空のドキュメントを作成して内容をレンダリング
     doc = markdown_parser.KnowledgeDocument(title=title)
     text = markdown_parser.render_markdown(doc)
-    filename = f"{title}.md"
 
-    # 即時アップロードしてリアルな file_id を取得
-    real_file_id = gdrive_client.upload_file_content(parent_id, filename, text, refresh_token=refresh_token)
-
-    if not real_file_id:
-        print(f"Failed to upload initial card content for {title}")
-        return None
-
-    # SQLite キャッシュに即時登録
+    # SQLite キャッシュに一時IDで即時登録 (未同期状態 dirty=1)
     db = database.connect(user_id=user_id)
     ts = database.now_iso()
     try:
         with db:
             db.execute(
                 "INSERT OR REPLACE INTO knowledge (title, drive_file_id, content, created_at, updated_at, dirty) "
-                "VALUES (?, ?, ?, ?, ?, 0)",
-                (title, real_file_id, text, ts, ts),
+                "VALUES (?, ?, ?, ?, ?, 1)",
+                (title, temp_file_id, text, ts, ts),
             )
-        return real_file_id
     except sqlite3.Error as e:
-        print(f"Failed to cache new card {title}: {e}")
-        return real_file_id
+        print(f"Failed to cache temporary new card {title}: {e}")
+        return None
     finally:
         db.close()
+
+    # バックグラウンドで Google ドライブ上にファイルを作成するスレッドを起動
+    payload = {
+        "temp_file_id": temp_file_id,
+        "title": title,
+        "content": text,
+        "user_id": user_id,
+        "refresh_token": refresh_token
+    }
+    
+    import threading
+    threading.Thread(target=_process_async_create_card, args=(payload,), daemon=True).start()
+
+    return temp_file_id
+
+
+def _process_async_create_card(payload: dict) -> None:
+    """バックグラウンドでドライブ上に新規ノートファイルを作成し、SQLite キャッシュの一時IDを本物の ID に更新する。"""
+    temp_file_id = payload["temp_file_id"]
+    title = payload["title"]
+    content = payload["content"]
+    user_id = payload["user_id"]
+    refresh_token = payload["refresh_token"]
+
+    from app import set_drive_task_status
+    set_drive_task_status(user_id, True, "ノートの新規作成")
+
+    try:
+        gdrive_client.set_thread_refresh_token(refresh_token)
+        service = gdrive_client.get_gdrive_service(refresh_token=refresh_token)
+        if not service:
+            return
+
+        structure = gdrive_client.ensure_vault_structure(user_id=user_id)
+        if not structure or "root" not in structure:
+            return
+        
+        parent_id = structure.get("knowledge")
+        if not parent_id:
+            root_id = structure["root"]
+            parent_id = gdrive_client.get_or_create_folder(service, root_id, "Knowledge")
+
+        filename = f"{title}.md"
+        real_file_id = gdrive_client.upload_file_content(
+            parent_id, filename, content, refresh_token=refresh_token
+        )
+
+        if real_file_id:
+            db = database.connect(user_id=user_id)
+            try:
+                with db:
+                    # 一時IDを本物IDに更新。その間に変更された可能性があるため content 更新はせず、IDのみ置換
+                    db.execute(
+                        "UPDATE knowledge SET drive_file_id = ?, dirty = 0 WHERE drive_file_id = ?",
+                        (real_file_id, temp_file_id)
+                    )
+            except sqlite3.Error as e:
+                print(f"Failed to update temporary ID in DB for {title}: {e}")
+            finally:
+                db.close()
+        gdrive_client.clear_thread_refresh_token()
+    except Exception as e:
+        print(f"Async card creation failed for {title}: {e}")
+    finally:
+        set_drive_task_status(user_id, False, None)
 
 
 def save_card(drive_file_id: str, doc: markdown_parser.KnowledgeDocument, user_id: str | None = None) -> bool:
     """カードの中身 (KnowledgeDocument) を SQLite キャッシュに即座に保存し、Google ドライブへは非同期スレッドでバックグラウンド保存する。"""
+    drive_file_id = resolve_real_file_id(drive_file_id, user_id=user_id)
     text = markdown_parser.render_markdown(doc)
     
     refresh_token = None
@@ -460,6 +531,7 @@ def save_card(drive_file_id: str, doc: markdown_parser.KnowledgeDocument, user_i
 
 def delete_card(drive_file_id: str, user_id: str | None = None) -> bool:
     """SQLite キャッシュから即時削除し、Google ドライブからは非同期スレッドで物理削除する。"""
+    drive_file_id = resolve_real_file_id(drive_file_id, user_id=user_id)
     refresh_token = None
     if has_request_context():
         if not user_id:

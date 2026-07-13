@@ -4,7 +4,7 @@
      hx-swap="innerHTML"
      hx-trigger="click">
     <h3 class="section-card-title">{{ sec.name }}</h3>
-    <div class="section-card-content">{{ sec.content | render_section_content | safe }}</div>
+    <div class="section-card-content" data-raw-content="{{ sec.content | e }}">{{ sec.content | render_section_content | safe }}</div>
     {% if sec.updated_at %}
         <div class="section-card-meta" style="text-align: right; font-size: 0.75rem; color: var(--color-text-gray); margin-top: 0.5rem; opacity: 0.85;">
             最終更新: {{ sec.updated_at }}{% if sec.updated_by %} ({{ sec.updated_by }}){% endif %}
