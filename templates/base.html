@@ -932,25 +932,6 @@
             closeHonkiEditor(true);
         }
 
-        // marked.js のカスタムリンクレンダラーを設定して Wikiリンク (wiki://) を HTMX 対応の HTML リンクに置換する
-        (function() {
-            if (typeof marked !== 'undefined') {
-                const renderer = new marked.Renderer();
-                
-                // リンクの処理をオーバーライド
-                renderer.link = function(href, title, text) {
-                    if (href && href.startsWith('wiki://')) {
-                        const fileId = href.replace('wiki://', '');
-                        return `<a href="/knowledge/${fileId}" hx-get="/knowledge/${fileId}" hx-target="#detail-pane" hx-push-url="true" onclick="event.stopPropagation();" class="wiki-link" style="color: var(--color-primary); font-weight: bold; text-decoration: underline;">${text}</a>`;
-                    }
-                    return `<a href="${href}" target="_blank" onclick="event.stopPropagation();" rel="noopener noreferrer">${text}</a>`;
-                };
-                
-                // marked オプションにセット
-                marked.setOptions({ renderer: renderer });
-            }
-        })();
-
         // セクションカード内の markdown を一括で HTML レンダリングする関数
         function renderMarkdownSections() {
             if (typeof marked === 'undefined') return;
@@ -960,10 +941,31 @@
                 if (el.getAttribute('data-markdown-rendered') === 'true') return;
                 
                 const raw = el.getAttribute('data-raw-content') || el.innerText;
-                // marked でマークダウンパース
+                // marked で標準マークダウンパース
                 const html = marked.parse(raw);
                 el.innerHTML = html;
                 el.setAttribute('data-markdown-rendered', 'true');
+                
+                // 生成された HTML 内の A タグを走査して wiki リンクを HTMX 化する (バージョン非依存で100%動作保証)
+                el.querySelectorAll('a').forEach(a => {
+                    const href = a.getAttribute('href');
+                    if (href && href.startsWith('wiki://')) {
+                        const fileId = href.replace('wiki://', '');
+                        a.setAttribute('href', `/knowledge/${fileId}`);
+                        a.setAttribute('hx-get', `/knowledge/${fileId}`);
+                        a.setAttribute('hx-target', '#detail-pane');
+                        a.setAttribute('hx-push-url', 'true');
+                        a.setAttribute('onclick', 'event.stopPropagation();');
+                        a.classList.add('wiki-link');
+                        a.style.color = 'var(--color-primary)';
+                        a.style.fontWeight = 'bold';
+                        a.style.textDecoration = 'underline';
+                    } else {
+                        a.setAttribute('target', '_blank');
+                        a.setAttribute('onclick', 'event.stopPropagation();');
+                        a.setAttribute('rel', 'noopener noreferrer');
+                    }
+                });
                 
                 // 動的に追加された HTMX 属性を HTMX に処理させて有効化する！
                 if (typeof htmx !== 'undefined') {
