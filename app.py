@@ -627,6 +627,30 @@ def save_section(drive_file_id: str, section_name: str):
     )
 
 
+@app.route("/knowledge/<drive_file_id>/sections/<section_name>/delete", methods=["DELETE"])
+def delete_section(drive_file_id: str, section_name: str):
+    """指定されたセクションをノートから削除し、非同期で Google ドライブへ保存する。"""
+    user_id = session.get("google_user_id")
+    doc, info = knowledge_repository.get_card_by_id(drive_file_id, user_id=user_id)
+    if not doc or not info:
+        return "ノートが見つかりません", 404
+
+    # 該当のセクションを除外
+    existing_len = len(doc.sections)
+    doc.sections = [sec for sec in doc.sections if sec.name != section_name]
+    
+    if len(doc.sections) == existing_len:
+        return "セクションが見つかりません", 404
+
+    # ドライブへの非同期保存の実行 (内部で即時SQLite更新 ＆ ドライブ並行保存 ＆ トースト連動)
+    success = knowledge_repository.save_card(drive_file_id, doc, user_id=user_id)
+    if not success:
+        return "保存処理の起動に失敗しました", 500
+
+    # 空のコンテンツを返却することで、HTMX が対象要素を画面から即座に消去する
+    return "", 200
+
+
 @app.route("/knowledge/<drive_file_id>/sections/reorder", methods=["POST"])
 def reorder_sections(drive_file_id: str):
     """ドラッグ＆ドロップによるセクションの順番並び替え要求を処理し、非同期で Google ドライブへ保存する。"""

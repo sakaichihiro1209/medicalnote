@@ -28,7 +28,14 @@
         </div>
     </div>
 
-    <div class="edit-actions">
+    <div class="edit-actions" style="display: flex; width: 100%;">
+        <button type="button" class="btn btn-danger" style="margin-right: auto;"
+                hx-delete="/knowledge/{{ info.drive_file_id }}/sections/{{ sec.name }}/delete"
+                hx-target="#sec-wrapper-{{ index }}"
+                hx-swap="outerHTML"
+                hx-confirm="このセクション「{{ sec.name }}」を本当に削除しますか？">
+            削除
+        </button>
         <button type="button" class="btn btn-secondary"
                 hx-get="{{ url_for('get_section_card', drive_file_id=info.drive_file_id, section_name=sec.name, index=index) }}"
                 hx-target="#sec-wrapper-{{ index }}"
