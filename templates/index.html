@@ -12,7 +12,7 @@
             <!-- リアルタイム検索 (HTMX) -->
             <div class="search-box">
                 <input type="text" name="query" class="input-text" placeholder="ノートを検索..."
-                       hx-get="{{ url_for('search_cards') }}" hx-trigger="keyup changed delay:200ms"
+                       hx-get="{{ url_for('search_cards') }}" hx-trigger="keyup changed delay:200ms, refresh-list from:body"
                        hx-target="#cards-list-container" id="search-input">
             </div>
             <!-- 新規作成ボタン (検索ボックス入力中のみ有効化する制御) -->

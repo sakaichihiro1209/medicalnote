@@ -532,7 +532,7 @@ def delete_card(drive_file_id: str):
         "<p class='welcome-text'>カードの削除が完了しました。</p>"
         "</div>"
     )
-    response.headers["HX-Trigger"] = "search-input"  # 一覧検索トリガーを起動してリフレッシュ
+    response.headers["HX-Trigger"] = "refresh-list"  # 一覧検索トリガーを起動してリフレッシュ
     return response
 
 
@@ -742,7 +742,20 @@ def inbox_list():
 def upload_status():
     """現在バックグラウンドでドライブ書き込み（アップロード等）が走っているかどうかを取得する。"""
     user_id = session.get("google_user_id")
-    return jsonify({"active": is_drive_task_active(user_id)})
+    active = is_drive_task_active(user_id)
+    
+    # 前回のActive状態をセッションから取得
+    was_active = session.get("last_drive_task_active", False)
+    
+    response = make_response(jsonify({"active": active}))
+    response.headers["Content-Type"] = "application/json"
+    
+    # Active -> Inactive (完了) に切り替わった瞬間に、サイドバーのリスト更新をトリガー！
+    if was_active and not active:
+        response.headers["HX-Trigger"] = "refresh-list"
+        
+    session["last_drive_task_active"] = active
+    return response
 
 
 def make_inbox_list_response(captures, user_id=None):

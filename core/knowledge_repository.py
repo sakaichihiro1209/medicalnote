@@ -311,14 +311,22 @@ def resolve_real_file_id(drive_file_id: str, user_id: str | None = None) -> str:
         
     db = database.connect(user_id=user_id)
     try:
-        # この一時IDと同じタイトルを持つレコードから現在の drive_file_id を取得
+        # 1. まず user_config 内のエイリアスマップから直接解決を試みる
         cur = db.execute(
-            "SELECT drive_file_id FROM knowledge WHERE title = (SELECT title FROM knowledge WHERE drive_file_id = ?)",
-            (drive_file_id,)
+            "SELECT value FROM user_config WHERE key = ?", (f"alias:{drive_file_id}",)
         )
         row = cur.fetchone()
         if row:
-            return row["drive_file_id"]
+            return row["value"]
+
+        # 2. もし未登録であれば、まだ更新直後かもしれないので title から引き当てる (フォールバック)
+        cur2 = db.execute(
+            "SELECT drive_file_id FROM knowledge WHERE title = (SELECT title FROM knowledge WHERE drive_file_id = ?)",
+            (drive_file_id,)
+        )
+        row2 = cur2.fetchone()
+        if row2 and not row2["drive_file_id"].startswith("temp_"):
+            return row2["drive_file_id"]
     except Exception:
         pass
     finally:
@@ -473,10 +481,15 @@ def _process_async_create_card(payload: dict) -> None:
             db = database.connect(user_id=user_id)
             try:
                 with db:
-                    # 一時IDを本物IDに更新。その間に変更された可能性があるため content 更新はせず、IDのみ置換
+                    # 一時IDを本物IDに更新。その間に変更された可能性があるため content や dirty は書き換えず、IDのみ置換
                     db.execute(
-                        "UPDATE knowledge SET drive_file_id = ?, dirty = 0 WHERE drive_file_id = ?",
+                        "UPDATE knowledge SET drive_file_id = ? WHERE drive_file_id = ?",
                         (real_file_id, temp_file_id)
+                    )
+                    # エイリアスマップを登録し、恒久的に逆引きできるようにする
+                    db.execute(
+                        "INSERT OR REPLACE INTO user_config (key, value) VALUES (?, ?)",
+                        (f"alias:{temp_file_id}", real_file_id)
                     )
             except sqlite3.Error as e:
                 print(f"Failed to update temporary ID in DB for {title}: {e}")
