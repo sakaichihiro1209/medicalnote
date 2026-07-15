@@ -2,7 +2,8 @@
      hx-get="{{ url_for('edit_section_form', drive_file_id=info.drive_file_id, section_name=sec.name, index=loop.index if loop is defined and loop.index is defined else index) }}"
      hx-target="#sec-wrapper-{{ loop.index if loop is defined and loop.index is defined else index }}"
      hx-swap="innerHTML"
-     hx-trigger="click[target.tagName !== 'A' && !target.closest('a')]">
+     hx-trigger="click[target.tagName !== 'A' && !target.closest('a') && !target.classList.contains('drag-handle')]">
+    <span class="material-symbols-outlined drag-handle" onclick="event.stopPropagation();">drag_handle</span>
     <h3 class="section-card-title">{{ sec.name }}</h3>
     <div class="section-card-content" data-raw-content="{{ sec.content | e }}">{{ sec.content | render_section_content | safe }}</div>
     {% if sec.updated_at %}

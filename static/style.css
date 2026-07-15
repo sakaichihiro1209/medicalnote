@@ -342,6 +342,7 @@ header {
   font-weight: 600;
   margin-bottom: 0.6rem;
   color: var(--sec-text-color, #2d3748);
+  padding-right: 1.8rem; /* ドラッグハンドルとの重なり防止 */
 }
 
 .section-card-content {
@@ -990,4 +991,30 @@ div:has(.edit-form).sortable-drag {
 
 .sortable-drag {
   opacity: 0.85;
+}
+
+/* ドラッグハンドル（≡）のスタイリング */
+.drag-handle {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+  cursor: grab;
+  color: var(--color-text-gray);
+  opacity: 0.4;
+  transition: opacity 0.2s ease, color 0.2s ease;
+  user-select: none;
+  font-size: 1.25rem !important;
+}
+
+.section-card:hover .drag-handle {
+  opacity: 0.95;
+}
+
+.drag-handle:hover {
+  color: var(--color-primary);
+  opacity: 1 !important;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
 }
