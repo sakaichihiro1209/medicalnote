@@ -31,8 +31,9 @@ from core import inbox_repository
 from core import markdown_parser
 from core import settings
 
-# ローカルデバッグ時の HTTP OAuth 許可
+# ローカルデバッグ時の HTTP OAuth 許可およびスコープ検証のリラックス
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 
 app = Flask(__name__)
 # Render.com等での本番鍵の取得、無ければデフォルト
@@ -225,7 +226,17 @@ def google_callback():
         if not code:
             return "認証コードが取得できませんでした", 400
 
-        flow.fetch_token(code=code)
+        # Render環境等での https プロトコル補正を含めた authorization_response でトークンを取得
+        auth_response = request.url
+        if not ("localhost" in auth_response or "127.0.0.1" in auth_response):
+            auth_response = auth_response.replace("http://", "https://")
+
+        try:
+            flow.fetch_token(authorization_response=auth_response)
+        except Exception as fe:
+            settings.log_debug(f"fetch_token with authorization_response failed ({fe}), falling back to code: {code}")
+            flow.fetch_token(code=code)
+
         credentials = flow.credentials
 
         refresh_token = credentials.refresh_token

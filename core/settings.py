@@ -67,13 +67,16 @@ def save_settings(data: dict) -> None:
 
 
 def get(key: str, default: str | None = None) -> str | None:
-    """指定されたキーの設定値を取得する。環境変数があればそちらを優先フォールバックする。"""
-    # 1. 永続設定ファイルから読み込み
+    """指定されたキーの設定値を取得する。環境変数(os.environ)があれば最優先し、無ければ settings.json から読み込む。"""
+    # 1. 環境変数から最優先読み込み (Render等の本番設定を確実に反映)
+    env_val = os.environ.get(key)
+    if env_val:
+        return env_val
+    # 2. 永続設定ファイルから読み込み
     val = load_settings().get(key)
     if val:
         return val
-    # 2. 環境変数からフォールバック読み込み
-    return os.environ.get(key, default)
+    return default
 
 
 def set_val(key: str, value: str) -> None:
