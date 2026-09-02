@@ -130,25 +130,33 @@ def handle_exception(e):
         <a href="/" style="display: inline-block; background: #3182ce; color: white; padding: 0.5rem 1.25rem; text-decoration: none; border-radius: 4px; font-weight: bold;">ホームに戻る</a>
     </body>
     </html>
-    """, 500
+    """
 
 
 @app.before_request
 def initialize_app():
-    """リクエスト処理の前に、ログインユーザー専用のキャッシュDBのテーブル初期化を行う。"""
+    """リクエスト処理の前に、キャッシュDBが存在しない場合のみ初期化を行う (毎リクエストのロック競合防止)。"""
     user_id = session.get("google_user_id")
-    if user_id:
+    db_path = database.get_db_path(user_id=user_id)
+    if not db_path.exists():
         database.init_db(user_id=user_id)
-    else:
-        database.init_db()
 
 
 def get_oauth_flow() -> Flow | None:
     """OAuth2 認証フローインスタンスを作成する。"""
-    client_id = settings.get("GOOGLE_CLIENT_ID")
-    client_secret = settings.get("GOOGLE_CLIENT_SECRET")
+    client_id = (settings.get("GOOGLE_CLIENT_ID") or "").strip()
+    client_secret = (settings.get("GOOGLE_CLIENT_SECRET") or "").strip()
     if not client_id or not client_secret:
         return None
+
+    try:
+        redirect_uri = url_for("google_callback", _external=True)
+    except Exception:
+        redirect_uri = "https://medicalnote.onrender.com/login/google/callback"
+
+    # ローカル開発環境以外は常にプロトコルを強制的に https:// へ統一する (OAuth仕様対策)
+    if not ("localhost" in redirect_uri or "127.0.0.1" in redirect_uri):
+        redirect_uri = redirect_uri.replace("http://", "https://")
 
     client_config = {
         "web": {
@@ -156,14 +164,10 @@ def get_oauth_flow() -> Flow | None:
             "client_secret": client_secret,
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "redirect_uris": [redirect_uri],
         }
     }
-    # コールバックURLを自動決定
-    redirect_uri = url_for("google_callback", _external=True)
-
-    # ローカル開発環境以外は常にプロトコルを強制的に https:// へ統一する (OAuth仕様対策)
-    if not ("localhost" in redirect_uri or "127.0.0.1" in redirect_uri):
-        redirect_uri = redirect_uri.replace("http://", "https://")
 
     return Flow.from_client_config(
         client_config,
@@ -211,7 +215,7 @@ def google_login():
             <a href="/" style="display: inline-block; background: #3182ce; color: white; padding: 0.5rem 1.25rem; text-decoration: none; border-radius: 4px; font-weight: bold;">ホームに戻る</a>
         </body>
         </html>
-        """, 500
+        """
 
 
 @app.route("/login/google/callback")
@@ -311,7 +315,7 @@ def google_callback():
             <a href="/" style="display: inline-block; background: #3182ce; color: white; padding: 0.5rem 1.25rem; text-decoration: none; border-radius: 4px; font-weight: bold;">ホームに戻る</a>
         </body>
         </html>
-        """, 500
+        """
 
 
 @app.route("/logout/google")
