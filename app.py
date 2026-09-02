@@ -1123,6 +1123,71 @@ def show_debug_logs():
     """
 
 
+@app.route("/debug/oauth")
+def debug_oauth():
+    """OAuth 接続設定と承認済みリダイレクト URI をリアルタイム診断表示する。"""
+    client_id = settings.get("GOOGLE_CLIENT_ID") or ""
+    client_secret = settings.get("GOOGLE_CLIENT_SECRET") or ""
+    
+    try:
+        redirect_uri = url_for("google_callback", _external=True)
+        if not ("localhost" in redirect_uri or "127.0.0.1" in redirect_uri):
+            redirect_uri = redirect_uri.replace("http://", "https://")
+    except Exception as e:
+        redirect_uri = f"Error generating redirect_uri: {e}"
+
+    client_id_preview = (client_id[:12] + "..." + client_id[-16:]) if len(client_id) > 28 else (client_id or "未設定")
+    secret_status = "✅ 設定済み" if client_secret else "❌ 未設定"
+    
+    user_id = session.get("google_user_id", "なし (未ログイン)")
+    has_token = "✅ あり" if session.get("google_refresh_token") else "❌ なし"
+
+    return f"""
+    <html>
+    <head><title>Google OAuth 接続診断 - 新人めも</title></head>
+    <body style="font-family: sans-serif; padding: 2rem; max-width: 750px; margin: 0 auto; line-height: 1.6; background: #f7fafc; color: #2d3748;">
+        <h2 style="color: #3182ce; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.5rem;">🔍 Google OAuth 接続診断ツール</h2>
+        <p>現在のサーバーと Google ドライブ連携の設定状態です：</p>
+        
+        <table style="width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 1.5rem;">
+            <tr style="border-bottom: 1px solid #edf2f7;">
+                <td style="padding: 0.75rem 1rem; font-weight: bold; background: #edf2f7; width: 35%;">項 目</td>
+                <td style="padding: 0.75rem 1rem; font-weight: bold; background: #edf2f7;">診 断 結 果 / 値</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #edf2f7;">
+                <td style="padding: 0.75rem 1rem; font-weight: bold;">クライアント ID</td>
+                <td style="padding: 0.75rem 1rem; font-family: monospace;">{client_id_preview}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #edf2f7;">
+                <td style="padding: 0.75rem 1rem; font-weight: bold;">クライアント シークレット</td>
+                <td style="padding: 0.75rem 1rem;">{secret_status}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #edf2f7; background: #fefcbf;">
+                <td style="padding: 0.75rem 1rem; font-weight: bold; color: #744210;">Googleに登録すべきリダイレクトURI</td>
+                <td style="padding: 0.75rem 1rem; font-family: monospace; font-weight: bold; color: #744210; word-break: break-all;">{redirect_uri}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #edf2f7;">
+                <td style="padding: 0.75rem 1rem; font-weight: bold;">現在のログインユーザー ID</td>
+                <td style="padding: 0.75rem 1rem;">{user_id}</td>
+            </tr>
+            <tr>
+                <td style="padding: 0.75rem 1rem; font-weight: bold;">リフレッシュトークン</td>
+                <td style="padding: 0.75rem 1rem;">{has_token}</td>
+            </tr>
+        </table>
+
+        <div style="background: #ebf8ff; border-left: 4px solid #3182ce; padding: 1rem; border-radius: 4px; margin-bottom: 1.5rem;">
+            <strong>💡 確認ポイント:</strong><br>
+            Google Cloud Console の「承認済みのリダイレクト URI」に、上記の黄色い行の <code>{redirect_uri}</code> が完全一致で登録されているか確認してください。
+        </div>
+
+        <a href="/login/google" style="display: inline-block; background: #3182ce; color: white; padding: 0.65rem 1.25rem; text-decoration: none; border-radius: 6px; font-weight: bold;">🚀 Google ログインを開始テスト</a>
+        <a href="/" style="display: inline-block; background: #e2e8f0; color: #4a5568; padding: 0.65rem 1.25rem; text-decoration: none; border-radius: 6px; font-weight: bold; margin-left: 0.5rem;">ホームに戻る</a>
+    </body>
+    </html>
+    """
+
+
 # =====================================================================
 # サーバー起動 (ローカル検証用)
 # =====================================================================
